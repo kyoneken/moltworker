@@ -1,8 +1,10 @@
 ---
 name: moltworker-slack-ready
 description: Send one Slack notification when the OpenClaw gateway starts.
-events:
-  - gateway:startup
+metadata:
+  openclaw:
+    events:
+      - gateway:startup
 ---
 
 Required environment variables:
