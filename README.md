@@ -72,7 +72,7 @@ npx wrangler r2 bucket create moltbot-data
 # Wrangler's prompt. Do not print it or reuse the gateway token.
 npx wrangler secret put AI_PROXY_TOKEN
 printf '%s' 'moltworker' | npx wrangler secret put AI_GATEWAY_ID
-printf '%s' 'https://moltbot-sandbox.example.workers.dev' | npx wrangler secret put WORKER_URL
+printf '%s' 'https://moltbot.kentymyty.com' | npx wrangler secret put WORKER_URL
 printf '%s' '10m' | npx wrangler secret put SANDBOX_SLEEP_AFTER
 
 # Generate and save a different random 64-hex gateway token in a password
@@ -86,10 +86,10 @@ npm run deploy
 After deploying, open the Control UI with your token:
 
 ```
-https://moltbot-sandbox.example.workers.dev/?token=YOUR_GATEWAY_TOKEN
+https://moltbot.kentymyty.com/?token=YOUR_GATEWAY_TOKEN
 ```
 
-Replace the example hostname with the deployed `workers.dev` hostname and `YOUR_GATEWAY_TOKEN` with the token you generated above. If deployment reports a different hostname, update the `WORKER_URL` secret and deploy again.
+Replace `YOUR_GATEWAY_TOKEN` with the token you generated above. Keep `WORKER_URL` set to `https://moltbot.kentymyty.com` so the proxy and CDP endpoints use the same production origin.
 
 **Note:** The first request may take 1-2 minutes while the container starts.
 
@@ -99,43 +99,55 @@ Replace the example hostname with the deployed `workers.dev` hostname and `YOUR_
 
 The required `moltbot-data` bucket was created before deployment; see [Persistent Storage (R2)](#persistent-storage-r2) for how snapshot persistence works.
 
+## Custom-Domain Cutover
+
+Phase 1 retains `workers_dev: true` while Wrangler provisions the custom domain route for `https://moltbot.kentymyty.com`. Keep the existing workers.dev origin available during this staged period so the custom hostname can be validated without interrupting the current deployment. The checked-in Phase 1 configuration intentionally omits `preview_urls`.
+
+After the custom hostname and Access policies pass the acceptance checks below, Phase 2 retires the staged origin by setting both `workers_dev: false` and `preview_urls: false` in `wrangler.jsonc`, then redeploying. Do not make that Phase 2 change until the custom hostname is serving the Worker and the rollback path has been confirmed.
+
+Acceptance checks:
+
+- `https://moltbot.kentymyty.com/` serves the Control UI, and the gateway token is required.
+- `wss://moltbot.kentymyty.com/ws?token=YOUR_GATEWAY_TOKEN` establishes the Control UI WebSocket.
+- The host-wide Access Allow application protects `/_admin/*`, `/api/*`, and `/debug/*`; there is no host-wide Bypass.
+- `/internal/ai/*` bypasses interactive Access but still returns `401` without `AI_PROXY_TOKEN`, and a protected smoke test succeeds with the expected AI Gateway log entry.
+- The exact `/cdp` path and `/cdp/*` paths bypass interactive Access but still require `CDP_SECRET`.
+- R2 persistence and device pairing continue to work through the custom hostname.
+
+Rollback: if any check fails, leave Phase 1 enabled and use the retained workers.dev origin while correcting the custom-domain or Access configuration. If Phase 2 has already been applied, restore `workers_dev: true`, remove `preview_urls: false`, redeploy, and verify the retained origin before retrying the cutover. Do not remove the host-wide Allow application or replace the path-specific exceptions with a host-wide Bypass.
+
 ## Setting Up the Admin UI
 
 To use the admin UI at `/_admin/` for device management, you need to:
-1. Enable Cloudflare Access on your worker
+1. Create the host-wide Cloudflare Access application and its narrowly scoped exceptions
 2. Set the Access secrets so the worker can validate JWTs
 
-### 1. Enable Cloudflare Access on workers.dev
+### 1. Create the host-wide Access application
 
-The easiest way to protect your worker is using the built-in Cloudflare Access integration for workers.dev:
+Configure the host-wide Cloudflare Access applications for the retained `workers.dev` origin and for `https://moltbot.kentymyty.com`. Validate the `workers.dev` application first, then apply the same settings to the custom-domain application. For the host-wide applications:
 
-1. Go to the [Workers & Pages dashboard](https://dash.cloudflare.com/?to=/:account/workers-and-pages)
-2. Select your Worker (e.g., `moltbot-sandbox`)
-3. In **Settings**, under **Domains & Routes**, in the `workers.dev` row, click the meatballs menu (`...`)
-4. Click **Enable Cloudflare Access**
-5. Copy the values shown in the dialog (you'll need the AUD tag later). **Note:** The "Manage Cloudflare Access" link in the dialog may 404 — ignore it.
-6. In **Zero Trust** → **Access controls** → **Applications**, open the host-wide application for the Worker.
-7. Under **Authentication**:
-   - Turn off **Accept all available identity providers**.
-   - Select only the existing Auth0-backed **Library OpenID Connect** provider.
-   - Turn on **Instant Auth** so users go directly to Auth0 without a One-time PIN choice.
-8. Create or attach the reusable Allow policy **moltworker Auth0 administrator**:
+1. Turn off **Accept all available identity providers**.
+2. Select only the existing Auth0-backed **Library OpenID Connect** provider.
+3. Turn on **Instant Auth** so users go directly to Auth0 without a One-time PIN choice.
+4. Create or attach the reusable Allow policy **moltworker Auth0 administrator**:
    - **Include** → **Emails** → cold.tent0355@fastmail.com
    - **Require** → **Login Methods** → **Library OpenID Connect**
    - **Session duration** → same as the application session duration
-9. Keep the application session duration at 24 hours and copy the unchanged **Application Audience (AUD)** tag for `CF_ACCESS_AUD`.
+5. Keep each application session duration at 24 hours and keep each application's **Application Audience (AUD)** tag unchanged.
 
-Application-level IdP selection removes One-time PIN, while the policy-level Login Methods requirement prevents authorization through a different IdP if application settings drift.
+Application-level IdP selection removes One-time PIN, while the policy-level Login Methods requirement prevents authorization through a different IdP if application settings drift. Keep the host-wide Allow applications in place while the more-specific AI and CDP exceptions are configured below.
 
 ### Required Access Exception for the AI Proxy
 
-OpenClaw runs inside the container and cannot complete an interactive Access login. Create a second, more-specific Access application for:
+OpenClaw runs inside the container and cannot complete an interactive Access login. Create a more-specific Access application for:
 
 ```
-https://moltbot-sandbox.example.workers.dev/internal/ai/*
+https://moltbot.kentymyty.com/internal/ai/*
 ```
 
-Give only that path a **Bypass / Everyone** policy. Keep the host-wide Access application in place for the Control UI and administrative routes. Cloudflare Access path specificity makes the proxy application take precedence, while the Worker still protects `POST /internal/ai/v1/chat/completions` with the independent, fail-closed `AI_PROXY_TOKEN` Bearer check. Never apply the bypass policy to the whole hostname.
+Give only that path a **Bypass / Everyone** policy. The Worker still protects `POST /internal/ai/v1/chat/completions` with the independent, fail-closed `AI_PROXY_TOKEN` Bearer check, so AI still requires `AI_PROXY_TOKEN` even though the request bypasses interactive Access login.
+
+Create two additional, narrowly scoped **Bypass / Everyone** applications for the CDP shim: one for the exact path `https://moltbot.kentymyty.com/cdp` and one for `https://moltbot.kentymyty.com/cdp/*`. CDP still requires `CDP_SECRET`. Keep the host-wide Allow application in place; no host-wide Bypass policy is permitted.
 
 ### 2. Set Access Secrets
 
@@ -145,11 +157,13 @@ After enabling Cloudflare Access, set the secrets so the worker can validate JWT
 # Your Cloudflare Access team domain (e.g., "myteam.cloudflareaccess.com")
 npx wrangler secret put CF_ACCESS_TEAM_DOMAIN
 
-# The Application Audience (AUD) tag from your Access application that you copied in the step above
+# One unchanged Application Audience (AUD) tag, or the comma-separated unchanged tags for both host-wide applications
 npx wrangler secret put CF_ACCESS_AUD
 ```
 
 You can find your team domain in the [Zero Trust Dashboard](https://one.dash.cloudflare.com/) under **Settings** > **Custom Pages** (it's the subdomain before `.cloudflareaccess.com`).
+
+`CF_ACCESS_AUD` accepts either one audience tag or a comma-separated list of the unchanged audience tags for the host-wide applications. The Worker trims each value, rejects empty elements, duplicates, and control characters, and validates the JWT against every configured audience. Do not record live audience values in source, documentation, issues, or logs.
 
 ### 3. Redeploy
 
@@ -161,26 +175,14 @@ Now visit `/_admin/` and you'll be prompted to authenticate via Cloudflare Acces
 
 ### Access SSO and Logout
 
-Cloudflare Access stores a global session at the team domain and an application session at the protected hostname. A valid global session can provide SSO between library and moltworker without another Auth0 prompt, while each application is still evaluated against its own policy. The moltworker application session remains 24 hours.
+Cloudflare Access maintains a global team-domain session and a separate application session for each protected host. A valid global session can provide SSO between the library and both moltworker hosts without another Auth0 prompt, while each application is still evaluated against its own Auth0-only policy. Each application session remains 24 hours.
 
-To end the current application session, visit:
+To end the current application session, visit the logout path on the host you want to sign out:
 
-    https://moltbot-sandbox.example.workers.dev/cdn-cgi/access/logout
+- `https://<workers-dev-host>/cdn-cgi/access/logout`
+- `https://moltbot.kentymyty.com/cdn-cgi/access/logout`
 
-After logout, the next protected request should redirect directly to Auth0. Replace the example hostname with the deployed hostname.
-
-### Alternative: Manual Access Application
-
-If you prefer more control, you can manually create an Access application:
-
-1. Go to [Cloudflare Zero Trust Dashboard](https://one.dash.cloudflare.com/)
-2. Navigate to **Access** > **Applications**
-3. Create a new **Self-hosted** application
-4. Set the application domain to your Worker URL (e.g., `moltbot-sandbox.your-subdomain.workers.dev`)
-5. Protect the Worker hostname, including `/_admin/*`, `/api/*`, and `/debug/*`
-6. Select only **Library OpenID Connect**, enable **Instant Auth**, and attach **moltworker Auth0 administrator**.
-7. Keep the generated audience tag unchanged and set CF_ACCESS_TEAM_DOMAIN and CF_ACCESS_AUD as shown above.
-8. Add the separate /internal/ai/* application and narrowly scoped bypass described above. If CDP is enabled, preserve its separate /cdp and /cdp/* bypass applications and Worker-level secret checks.
+Replace `<workers-dev-host>` with the deployed `workers.dev` hostname. After logout, the next protected request on that host should redirect directly to Auth0.
 
 ### Local Development
 
@@ -209,8 +211,8 @@ This is the most secure option as it requires explicit approval for each device.
 A gateway token is required to access the Control UI when hosted remotely. Pass it as a query parameter:
 
 ```
-https://moltbot-sandbox.example.workers.dev/?token=YOUR_TOKEN
-wss://moltbot-sandbox.example.workers.dev/ws?token=YOUR_TOKEN
+https://moltbot.kentymyty.com/?token=YOUR_TOKEN
+wss://moltbot.kentymyty.com/ws?token=YOUR_TOKEN
 ```
 
 **Note:** Even with a valid token, new devices still require approval via the admin UI at `/_admin/` (see Device Pairing above).
@@ -265,6 +267,26 @@ printf '%s' '10m' | npx wrangler secret put SANDBOX_SLEEP_AFTER
 
 When the container sleeps, the next request will trigger a cold start. If you have R2 storage configured, your paired devices and data will persist across restarts.
 
+### Waking a sleeping container
+
+Moltworker's Slack integration uses Socket Mode, which requires an outbound
+WebSocket from the OpenClaw process. When the container is sleeping, it has no
+live Socket Mode connection, so an ordinary Slack message cannot wake it.
+
+Use an authenticated browser request as the default wake action: open the
+Control UI URL with the gateway token, for example
+`https://moltbot.kentymyty.com/?token=YOUR_GATEWAY_TOKEN`. A configured Cron
+job or another external request to the Worker can also wake it. Wait for the
+gateway to finish its cold start before sending a Slack mention.
+
+When `SLACK_READY_CHANNEL_ID` is configured together with both Slack tokens,
+the managed `moltworker-slack-ready` hook posts one message in that channel
+after the new gateway generation is ready:
+`OpenClaw is ready · <ISO-8601 UTC timestamp>`. Seeing that message confirms
+that the gateway and Slack channel path are available. It is a readiness
+signal, not a Slack wake endpoint. Omit `SLACK_READY_CHANNEL_ID` to disable
+the notification.
+
 ## Admin UI
 
 ![admin ui](./assets/adminui.png)
@@ -302,11 +324,124 @@ npm run deploy
 
 ### Slack
 
+Moltworker uses OpenClaw's Slack plugin in Socket Mode. There is no Slack
+channel or session "Add" button in the Control UI: install the Slack app into
+the workspace, invite it to a Slack channel, and send the first mention. The
+session is created automatically when OpenClaw receives that message.
+
+#### 1. Create the Slack app
+
+1. Open [Slack API Apps](https://api.slack.com/apps) and select **Create New App** > **From a manifest**.
+2. Select the target workspace.
+3. Paste [`docs/slack-app-manifest.json`](./docs/slack-app-manifest.json), then create the app.
+4. Under **Basic Information** > **App-Level Tokens**, select **Generate Token and Scopes**.
+5. Add the `connections:write` scope and copy the resulting `xapp-...` token.
+6. Under **Install App**, install the app to the workspace and copy the **Bot User OAuth Token** (`xoxb-...`). Reinstall the app after any later scope or event changes.
+
+Socket Mode uses an outbound WebSocket connection, so Slack does not need a
+public Request URL for the Worker.
+
+#### 2. Configure and deploy Moltworker
+
 ```bash
+# Enter the xoxb- token at the first prompt.
 npx wrangler secret put SLACK_BOT_TOKEN
+
+# Enter the xapp- token at the second prompt.
 npx wrangler secret put SLACK_APP_TOKEN
+
+# Optional: enter the stable target channel ID (C... or G...) at the prompt.
+# Omit this secret to disable the one-per-container-generation ready message.
+npx wrangler secret put SLACK_READY_CHANNEL_ID
+
+# Recommended: enter one or more comma-separated stable channel IDs (C... or G...).
+# In Slack, open the channel details and copy the Channel ID from the About tab.
+npx wrangler secret put SLACK_ALLOWED_CHANNELS
+
 npm run deploy
 ```
+
+Both tokens are required. The deployed container enables Slack in Socket Mode
+with `groupPolicy: "allowlist"` by default. With no allowlist, channel
+messages are blocked. The command above stores the allowlist as an encrypted
+Worker secret; it may instead be configured as a regular Worker variable in the
+Cloudflare dashboard. To allow every channel the app joins, omit the allowlist
+command and explicitly opt in before deployment:
+
+`SLACK_READY_CHANNEL_ID` is a stable Slack channel ID copied from the channel's
+About tab. It must be a channel or group-channel ID beginning with `C` or `G`;
+the managed hook trims and validates the value. The ready notification is
+enabled only when this ID and both Slack tokens are present. Omitting it (or
+using an invalid value) disables only the ready notification; it does not stop
+the gateway or the normal Slack integration.
+
+```bash
+npx wrangler secret put SLACK_GROUP_POLICY
+# Enter: open
+```
+
+`open` applies to every public or private channel the Slack app has joined;
+channels the app has not joined remain invisible to it. Channel messages still
+require an `@OpenClaw` mention by default.
+
+#### 3. Add a channel and create its first session
+
+In each Slack channel that should use OpenClaw:
+
+1. Run `/invite @OpenClaw` (use the bot display name selected in the manifest).
+2. Send `@OpenClaw hello`.
+3. Wait for the reply, then open the OpenClaw Control UI. The Slack session now appears in the session list; it is not created in advance from Overview.
+
+Top-level conversation state is isolated by Slack channel. A mentioned message
+that starts a Slack thread and its replies use a separate thread session, while
+ordinary top-level messages continue using the channel session. Replies in a
+thread where OpenClaw already participated do not need another mention by
+default.
+
+If the bot does not reply, confirm that it is a member of the channel, both
+secrets are present, and the Slack app was reinstalled after its manifest was
+changed. Then recreate the container from `/_admin/` or redeploy so the gateway
+restarts with the current secrets.
+
+#### Cold-start ready verification
+
+For a reproducible production check covering cold wake, warm requests,
+gateway-only restarts, a new container generation, and Slack failures, run
+[`test/e2e/slack_ready_notification.txt`](./test/e2e/slack_ready_notification.txt)
+with the prerequisites documented at the top of that fixture. Copy its
+timestamp, count, process, version, and deployment outputs into the Issue #18
+evidence comment; do not report a production result until those steps have
+actually been run.
+
+#### Slack threading configuration
+
+The startup patch owns the Slack channel configuration. Set the environment
+variables below to override the managed values; this is the supported override
+mechanism. Validation occurs only when both Slack tokens enable the
+integration; then the variables affect the Slack config. The resolved threading
+values are written to `openclaw.json`; only the Slack token values are kept out
+of that file and its R2 snapshots.
+
+| Variable | Default | Allowed values / meaning |
+|----------|---------|--------------------------|
+| `SLACK_GROUP_POLICY` | `allowlist` | `allowlist`, `open`, or `disabled`; `open` is an explicit opt-in for all joined channels |
+| `SLACK_ALLOWED_CHANNELS` | empty | Comma-separated stable Slack channel IDs such as `C12345678` or `G12345678`; used by `allowlist` and empty means no channel access |
+| `SLACK_CHANNEL_REPLY_TO_MODE` | `all` | `off`, `first`, `all`, or `batched`; controls top-level `replyToMode` and the channel value in `replyToModeByChatType` |
+| `SLACK_THREAD_HISTORY_SCOPE` | `thread` | `thread` or `channel`; selects the history scope used to hydrate a thread |
+| `SLACK_THREAD_INHERIT_PARENT` | `false` | `true` or `false`; `false` keeps a thread from inheriting unrelated channel history |
+| `SLACK_THREAD_INITIAL_HISTORY_LIMIT` | `20` | A base-10 safe integer greater than or equal to `0`; maximum initial messages fetched for hydration |
+| `SLACK_THREAD_REQUIRE_EXPLICIT_MENTION` | `false` | `true` or `false`; when `false`, a follow-up in a thread needs no new mention after OpenClaw has participated |
+
+For a channel admitted by the allowlist (or by explicit `open` policy), the
+threading defaults make a top-level mention start a Slack thread. Replies in
+that Slack thread continue in the same isolated OpenClaw thread session and do
+not need another mention after the bot has participated. Different Slack roots
+have different sessions. `inheritParent=false` prevents unrelated channel
+transcript from being copied into a new thread session, and the first hydration
+fetches 20 messages by default. Direct messages and group DMs remain off-thread:
+their `replyToModeByChatType` values are always `off` and cannot be changed with
+these environment variables. The channel value is the only chat-type reply mode
+exposed for override.
 
 ## Optional: Browser Automation (CDP)
 
@@ -325,7 +460,7 @@ npx wrangler secret put CDP_SECRET
 
 ```bash
 npx wrangler secret put WORKER_URL
-# Enter: https://moltbot-sandbox.example.workers.dev
+# Enter: https://moltbot.kentymyty.com
 ```
 
 3. Redeploy:
@@ -373,10 +508,13 @@ See `skills/cloudflare-browser/SKILL.md` for full documentation.
 
 The checked-in Wrangler configuration exposes the Cloudflare Workers AI binding as `AI`. OpenClaw does not call that binding directly from the container. Instead, it sends OpenAI-compatible requests to `POST /internal/ai/v1/chat/completions`; the Worker authenticates the request with `AI_PROXY_TOKEN`, allowlists the model, and invokes `env.AI.run()` through the `AI_GATEWAY_ID` gateway.
 
-The default deployment registers exactly two OpenClaw models:
+The default deployment registers exactly three OpenClaw models. The model policy is fixed:
 
 - `cf-workers-ai/@cf/zai-org/glm-4.7-flash` (`GLM 4.7 Flash`) is the primary model.
 - `cf-workers-ai/@cf/moonshotai/kimi-k2.7-code` (`Kimi K2.7 Code (manual)`) is available only when explicitly selected. It is never an automatic fallback.
+- `cf-workers-ai/@cf/qwen/qwen3.8-27b` (`Qwen 3.8 27B (manual)`) is available only when explicitly selected. It is never an automatic fallback.
+
+The authenticated `GET /internal/ai/v1/models` endpoint lists these three registered models and their selection metadata. It requires the same `AI_PROXY_TOKEN` Bearer credential as chat completions. Qwen is enabled for text, reasoning, and function/tool calling through this proxy. Cloudflare documents upstream vision support for Qwen, but vision input is deferred until a separate reviewed contract covers image validation, size limits, remote-fetch boundaries, and production evidence; this deployment advertises text input only.
 
 The container receives the public proxy base URL and a dedicated Bearer secret. It does not receive a Cloudflare API token, AI Gateway management token, Workers AI token, or external-provider key. Keep `AI_PROXY_TOKEN` separate from `MOLTBOT_GATEWAY_TOKEN`.
 
@@ -388,9 +526,19 @@ The upstream direct Anthropic, direct OpenAI, native Cloudflare AI Gateway, and 
 
 ## Production Proxy Smoke Test
 
-After deployment and Access configuration, load `AI_PROXY_TOKEN` from your secret manager into a protected process environment without printing it. Use an HTTP client that constructs the `Authorization: Bearer ...` header in memory rather than placing the secret in command arguments or shell history. Send one small JSON chat-completions request to `https://moltbot-sandbox.example.workers.dev/internal/ai/v1/chat/completions` with model `@cf/zai-org/glm-4.7-flash`, verify a successful OpenAI-compatible response, and confirm the matching entry appears in the `moltworker` AI Gateway logs. Do not intentionally exhaust rate or spend limits.
+After deployment and Access configuration, load `AI_PROXY_TOKEN` from your secret manager into a protected process environment without printing it. Use an HTTP client that constructs the `Authorization: Bearer ...` header in memory rather than placing the secret in command arguments or shell history. Send one small JSON chat-completions request to `https://moltbot.kentymyty.com/internal/ai/v1/chat/completions` with model `@cf/zai-org/glm-4.7-flash`, verify a successful OpenAI-compatible response, and confirm the matching entry appears in the `moltworker` AI Gateway logs. Do not intentionally exhaust rate or spend limits.
 
-Also verify that a request without the Bearer credential returns `401`, an unknown model returns `400`, and neither request starts the container or creates an AI Gateway inference log. Never record request headers or the proxy token in test output.
+The checked-in smoke runner performs six structural checks: authenticated model listing, unknown-model rejection, Qwen non-streaming text, Qwen streaming, one tool call, and parallel tool calls. The tool cases send `tool_choice: "required"` and prompts asking for each named tool exactly once, but tool selection remains model output: a parallel response with fewer than two calls is reported as a structural failure even when the proxy is healthy. It reads `WORKER_URL` and `AI_PROXY_TOKEN` only from the process environment, constructs the Bearer header in memory, and prints only case names, statuses, request IDs, selected models, and structural counts. It never prints or writes response content, request headers, Access JWTs, tool arguments, or the proxy token.
+
+Run it only after separate approval for the deployment and any paid inference. Use a secret manager to inject the token, do not paste it into shell history, and do not capture command output as an artifact:
+
+```bash
+WORKER_URL=https://moltbot-sandbox.example.workers.dev \
+AI_PROXY_TOKEN="$(read-secret-with-your-secret-manager)" \
+npm run smoke:workers-ai-model
+```
+
+The runner is intentionally not a deployment command and does not authorize production inference by itself. Do not intentionally exhaust rate or spend limits. For a manual negative check, a request without the Bearer credential should return `401`, an unknown model should return `400`, and neither request should start the container or create an AI Gateway inference log. Never record request headers or the proxy token in test output.
 
 ## Configuration Reference
 
@@ -399,7 +547,7 @@ Also verify that a request without the Bearer credential returns `401`, an unkno
 | `AI` | Binding | Yes* | Workers AI binding used by the authenticated inference proxy; configured in `wrangler.jsonc` |
 | `AI_PROXY_TOKEN` | Secret | Yes* | Dedicated random 256-bit Bearer token shared only with the OpenClaw container |
 | `AI_GATEWAY_ID` | Secret/variable | Yes* | AI Gateway ID used by `env.AI.run()`; recommended value: `moltworker` |
-| `WORKER_URL` | Secret/variable | Yes* | Public Worker origin, such as `https://moltbot-sandbox.example.workers.dev`; required by the proxy and CDP |
+| `WORKER_URL` | Secret/variable | Yes* | Public Worker origin, `https://moltbot.kentymyty.com`; required by the proxy and CDP |
 | `BACKUP_BUCKET` | Binding | Yes* | R2 binding used for Sandbox SDK snapshot persistence; defaults to bucket `moltbot-data` |
 | `CLOUDFLARE_AI_GATEWAY_API_KEY` | Secret | Alternative | Upstream native-provider credential; not used by the default Workers AI proxy deployment |
 | `CF_AI_GATEWAY_ACCOUNT_ID` | Secret/variable | Alternative | Upstream native-provider account ID |
@@ -420,8 +568,16 @@ Also verify that a request without the Bearer credential returns `401`, an unkno
 | `TELEGRAM_DM_POLICY` | Variable | No | Telegram DM policy: `pairing` (default) or `open` |
 | `DISCORD_BOT_TOKEN` | Secret | No | Discord bot token |
 | `DISCORD_DM_POLICY` | Variable | No | Discord DM policy: `pairing` (default) or `open` |
-| `SLACK_BOT_TOKEN` | Secret | No | Slack bot token |
-| `SLACK_APP_TOKEN` | Secret | No | Slack app token |
+| `SLACK_BOT_TOKEN` | Secret | No | Slack Bot User OAuth Token (`xoxb-...`) |
+| `SLACK_APP_TOKEN` | Secret | No | Slack App-Level Token (`xapp-...`) with `connections:write` |
+| `SLACK_READY_CHANNEL_ID` | Secret/variable | No | Stable `C...` or `G...` channel ID for one ready message per container generation; omit to disable |
+| `SLACK_GROUP_POLICY` | Variable | No | Channel policy: `allowlist` (default), `open` (explicit opt-in), or `disabled` |
+| `SLACK_ALLOWED_CHANNELS` | Variable | No | Comma-separated stable Slack channel IDs used by the `allowlist` policy |
+| `SLACK_CHANNEL_REPLY_TO_MODE` | Variable | No | Channel reply mode: `off`, `first`, `all` (default), or `batched` |
+| `SLACK_THREAD_HISTORY_SCOPE` | Variable | No | Thread hydration scope: `thread` (default) or `channel` |
+| `SLACK_THREAD_INHERIT_PARENT` | Variable | No | Whether a thread inherits parent history: `false` (default) or `true` |
+| `SLACK_THREAD_INITIAL_HISTORY_LIMIT` | Variable | No | Base-10 nonnegative safe integer; default `20` |
+| `SLACK_THREAD_REQUIRE_EXPLICIT_MENTION` | Variable | No | Require a mention for every thread follow-up: `false` (default) or `true` |
 | `CDP_SECRET` | Secret | No | Shared secret for CDP endpoint authentication (see [Browser Automation](#optional-browser-automation-cdp)) |
 
 `Yes*` marks the values and bindings required together for the default Workers AI proxy deployment. A backward-compatible provider alternative can satisfy application startup validation instead, but it does not implement this deployment architecture.
@@ -432,7 +588,7 @@ Also verify that a request without the Bearer credential returns `401`, an unkno
 
 OpenClaw in Cloudflare Sandbox uses multiple authentication layers:
 
-1. **Cloudflare Access with Auth0** - Protects the production hostname and administrative routes. Host-wide applications accept only Library OpenID Connect, enable Instant Auth, and authorize only the configured administrator policy. More-specific /internal/ai/* and optional CDP bypass applications remain protected independently by Worker-level secrets.
+1. **Cloudflare Access with Auth0** - Protects both production hostnames and administrative routes. Host-wide applications accept only Library OpenID Connect, enable Instant Auth, and authorize only the `moltworker Auth0 administrator` policy. More-specific `/internal/ai/*` and optional CDP bypass applications remain protected independently by Worker-level secrets.
 
 2. **AI Proxy Token** - Required by the internal inference route and checked before request parsing. It is independent from the gateway token and is never serialized into `openclaw.json` or its R2 snapshots.
 
@@ -446,6 +602,14 @@ OpenClaw in Cloudflare Sandbox uses multiple authentication layers:
 
 **Gateway fails to start:** Check `npx wrangler secret list` and `npx wrangler tail`
 
+**Gateway is healthy but no Slack ready message appears:** Confirm that
+`SLACK_READY_CHANNEL_ID` is a stable `C...` or `G...` channel ID, the bot is a
+member of that channel, and the app has `chat:write`. An omitted or invalid
+channel ID intentionally disables only the ready hook. A missing Slack scope,
+invalid destination, or other Slack API failure is nonfatal; verify gateway
+health with `GET /api/status`, then inspect the relevant deployment/container
+logs without recording tokens or full Slack responses.
+
 **Config changes not working:** Edit the `# Build cache bust:` comment in `Dockerfile` and redeploy
 
 **Slow first request:** Cold starts take 1-2 minutes. Subsequent requests are faster.
@@ -456,7 +620,7 @@ OpenClaw in Cloudflare Sandbox uses multiple authentication layers:
 
 **Proxy inference fails closed:** Confirm `AI_GATEWAY_ID` names an existing AI Gateway, `WORKER_URL` exactly matches the deployed Worker origin, and the `AI` binding is present in the deployed Worker configuration.
 
-**Access denied on admin routes:** Check that `CF_ACCESS_TEAM_DOMAIN` and `CF_ACCESS_AUD` remain set, the application audience still matches `CF_ACCESS_AUD`, Library OpenID Connect is the only selected provider, and moltworker Auth0 administrator contains the exact email and Login Methods requirement.
+**Access denied on admin routes:** Check that `CF_ACCESS_TEAM_DOMAIN` and `CF_ACCESS_AUD` remain set, each host-wide application still selects only Library OpenID Connect with Instant Auth, and `moltworker Auth0 administrator` contains the exact email and Login Methods requirement. When both host-wide applications are active, keep their unchanged audience tags in `CF_ACCESS_AUD` as a comma-separated list with no empty, duplicate, or control-character values.
 
 **Devices not appearing in admin UI:** Device list commands take 10-15 seconds due to WebSocket connection overhead. Wait and refresh.
 
