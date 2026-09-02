@@ -33,6 +33,19 @@ fallback when an MCP operation is unavailable; stop and report the missing
 capability instead. This restriction applies equally to scheduled and resumed
 runs.
 
+### Project Codex Hook
+
+The project-local Hook is defined in `.codex/hooks.json`; review and trust it
+through `/hooks` before relying on it. A changed definition is skipped until
+it is re-reviewed and re-trusted.
+
+The Hook blocks forbidden Bash GitHub paths, Cloudflare Issue/PR lookups, and
+non-canonical GitHub MCP mutations. It deliberately permits Cloudflare
+code/repository research and other allowed read operations.
+
+AGENTS.md remains authoritative if the Hook is disabled, untrusted,
+unavailable, or unable to parse a shell construct.
+
 ## Project Overview
 
 This is a Cloudflare Worker that runs [OpenClaw](https://github.com/openclaw/openclaw) (formerly Moltbot/Clawdbot) in a Cloudflare Sandbox container. It provides:
