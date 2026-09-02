@@ -207,7 +207,11 @@ class UpstreamWriteGuardTests(unittest.TestCase):
             __import__("re").search(matcher, "mcp__github__issue_write")
         )
         self.assertIsNone(__import__("re").search(matcher, "WebSearch"))
-        command = github_group["hooks"][0]["command"]
+        command = next(
+            hook["command"]
+            for hook in github_group["hooks"]
+            if "upstream_write_guard.py" in hook.get("command", "")
+        )
 
         result = subprocess.run(
             command,

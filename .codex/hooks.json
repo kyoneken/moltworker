@@ -1,10 +1,16 @@
 {
-  "description": "Repository guardrails for Codex tool calls.",
+  "description": "Guard moltworker GitHub operations before tool execution.",
   "hooks": {
     "PreToolUse": [
       {
-        "matcher": "^(Bash|mcp__github__.*)$",
+        "matcher": "^Bash$|^mcp__github__.*",
         "hooks": [
+          {
+            "type": "command",
+            "command": "/usr/bin/env node \"$(git rev-parse --show-toplevel)/.codex/hooks/github-policy.mjs\"",
+            "timeout": 10,
+            "statusMessage": "Checking repository GitHub policy"
+          },
           {
             "type": "command",
             "command": "/usr/bin/python3 \"$(git rev-parse --show-toplevel)/.codex/hooks/upstream_write_guard.py\"",
