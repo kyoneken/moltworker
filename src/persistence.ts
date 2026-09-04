@@ -380,7 +380,9 @@ export async function restoreIfNeeded(sandbox: Sandbox, bucket: R2Bucket): Promi
       name === 'BackupExpiredError' ||
       name === 'BackupNotFoundError' ||
       msg.includes('BACKUP_EXPIRED') ||
-      msg.includes('BACKUP_NOT_FOUND');
+      msg.includes('BACKUP_NOT_FOUND') ||
+      msg.startsWith('BackupExpiredError:') ||
+      msg.startsWith('BackupNotFoundError:');
     if (backupUnavailable) {
       console.log(
         `[persistence] Backup ${handle.id} expired/gone, conditionally invalidating state`,

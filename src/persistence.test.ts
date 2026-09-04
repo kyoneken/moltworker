@@ -544,6 +544,12 @@ describe('restoreIfNeeded', () => {
         { name: 'BackupExpiredError', code: 'BACKUP_EXPIRED' },
       ),
     },
+    {
+      label: 'RPC-serialized BackupExpiredError',
+      error: new Error(
+        'BackupExpiredError: Backup 83a10969-7398-4f3c-b51c-f981e815ee56 has expired (created: 2026-08-27T21:49:50.948Z, TTL: 604800s). Create a new backup.',
+      ),
+    },
   ])(
     'clears a $label handle and pending restore marker, then marks this isolate restored',
     async ({ error }) => {
