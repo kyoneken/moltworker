@@ -73,7 +73,7 @@ async function apiRequest<T>(path: string, options: globalThis.RequestInit = {})
   } as globalThis.RequestInit);
 
   if (response.status === 401) {
-    throw new AuthError('未認証です。Cloudflare Access でログインしてください');
+    throw new AuthError('Unauthorized - please log in via Cloudflare Access');
   }
 
   const data = (await response.json()) as T & { error?: string };

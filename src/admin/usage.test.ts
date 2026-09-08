@@ -141,7 +141,7 @@ describe('createUsageSnapshot', () => {
     );
 
     expect(snapshot.source).toBe('env-limits');
-    expect(snapshot.message).toContain('AI Gateway のライブ利用量の取得に失敗しました');
+    expect(snapshot.message).toContain('Live AI Gateway usage fetch failed');
     expect(snapshot.windows[0]).toMatchObject({
       usedCostUsd: 8,
       state: 'near',
@@ -159,6 +159,6 @@ describe('createUsageSnapshot', () => {
       }),
     );
     expect(snapshot.source).toBe('env-limits');
-    expect(snapshot.message).toContain('ライブのゲートウェイ認証情報なし');
+    expect(snapshot.message).toContain('no live gateway credentials');
   });
 });

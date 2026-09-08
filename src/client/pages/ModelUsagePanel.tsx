@@ -11,7 +11,7 @@ import {
 } from '../api';
 
 function formatReset(iso: string | null) {
-  if (!iso) return 'なし';
+  if (!iso) return 'n/a';
   try {
     return new Date(iso).toLocaleString();
   } catch {
@@ -39,9 +39,9 @@ export default function ModelUsagePanel() {
       setUsage(usageSnapshot);
     } catch (err) {
       if (err instanceof AuthError) {
-        setError('認証が必要です。Cloudflare Access でログインしてください。');
+        setError('Authentication required. Please log in via Cloudflare Access.');
       } else {
-        setError(err instanceof Error ? err.message : 'モデル利用状況の取得に失敗しました');
+        setError(err instanceof Error ? err.message : 'Failed to load model usage');
       }
     }
   }, []);
@@ -56,7 +56,7 @@ export default function ModelUsagePanel() {
       const next = await setSessionModel(model);
       setSession(next);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'セッションモデルの更新に失敗しました');
+      setError(err instanceof Error ? err.message : 'Failed to update session model');
     } finally {
       setSaving(false);
     }
@@ -68,27 +68,28 @@ export default function ModelUsagePanel() {
   return (
     <section className="devices-section">
       <div className="section-header">
-        <h2>モデルと利用量</h2>
+        <h2>Models and usage</h2>
         <button className="btn btn-secondary" onClick={() => void load()} disabled={saving}>
-          更新
+          Refresh
         </button>
       </div>
       {error && <p className="hint">{error}</p>}
       {limited && (
         <div className="error-banner">
-          <span>レートまたは支出上限に達しました。自動フォールバックは無効です。同じモデルで後から再試行してください。</span>
+          <span>Rate or spend limit reached. Automatic fallback is disabled. Retry the same model later.</span>
         </div>
       )}
       {!limited && near && (
         <div className="warning-banner">
           <div className="warning-content">
-            <strong>上限に近づいています</strong>
-            <p>24時間または30日の窓が、設定上限の80%以上です。</p>
+            <strong>Approaching budget</strong>
+            <p>A 24h or 30d window is at or above 80% of its configured cap.</p>
           </div>
         </div>
       )}
       <p className="hint">
-        選択中のセッションモデル: {session?.model ?? '読み込み中'}（{session?.source ?? 'なし'}）。手動専用モデルは自動選択されません。
+        Selected session model: {session?.model ?? 'loading'} ({session?.source ?? 'n/a'}). Manual-only
+        models are never chosen automatically.
       </p>
       <div className="devices-grid">
         {models.map((model) => (
@@ -96,7 +97,7 @@ export default function ModelUsagePanel() {
             <div className="device-header">
               <span className="device-name">{model.name}</span>
               <span className={`device-badge ${model.primary ? 'paired' : 'pending'}`}>
-                {model.primary ? 'プライマリ' : '手動のみ'}
+                {model.primary ? 'Primary' : 'Manual only'}
               </span>
             </div>
             <div className="device-details">
@@ -105,12 +106,12 @@ export default function ModelUsagePanel() {
                 <span className="value">{model.id}</span>
               </div>
               <div className="detail-row">
-                <span className="label">コンテキスト</span>
+                <span className="label">Context</span>
                 <span className="value">{model.context_window.toLocaleString()}</span>
               </div>
               <div className="detail-row">
-                <span className="label">ツール</span>
-                <span className="value">{model.supports_tools ? 'あり' : 'なし'}</span>
+                <span className="label">Tools</span>
+                <span className="value">{model.supports_tools ? 'yes' : 'no'}</span>
               </div>
             </div>
             <div className="device-actions">
@@ -119,7 +120,7 @@ export default function ModelUsagePanel() {
                 disabled={saving || session?.model === model.id}
                 onClick={() => void handleSelect(model.id)}
               >
-                {session?.model === model.id ? '選択中' : 'このモデルを使う'}
+                {session?.model === model.id ? 'Selected' : 'Use this model'}
               </button>
             </div>
           </div>
@@ -132,9 +133,8 @@ export default function ModelUsagePanel() {
             <div key={window.window} className="detail-row">
               <span className="label">{window.window}</span>
               <span className="value">
-                状態={window.state === 'limited' ? '制限中' : window.state === 'near' ? '逼迫' : window.state}
-                ; 費用 {window.usedCostUsd ?? '—'}/{window.limitCostUsd ?? '—'} USD; トークン{' '}
-                {window.usedTokens ?? '—'}/{window.limitTokens ?? '—'}; リセット{' '}
+                state={window.state}; cost {window.usedCostUsd ?? '—'}/{window.limitCostUsd ?? '—'} USD;
+                tokens {window.usedTokens ?? '—'}/{window.limitTokens ?? '—'}; reset{' '}
                 {formatReset(window.resetAt)}
               </span>
             </div>
