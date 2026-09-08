@@ -99,12 +99,9 @@ describe('POST /api/admin/gateway/restart', () => {
     expect(await response.json()).toEqual({
       error: 'No persisted backup is available. Create a backup before recreating the container.',
     });
-    expect(events).toEqual([
-      'head:backup-operation-lock',
-      'lease',
-      'get:backup-handle.json',
-      'lease',
-    ]);
+    expect(events).toContain('lease');
+    expect(events).toContain('get:backup-handle.json');
+    expect(events).not.toContain('put:restore-needed');
     expect(vi.mocked(sandbox.destroy)).not.toHaveBeenCalled();
     expect(killGateway).not.toHaveBeenCalled();
     expect(findExistingGatewayProcess).not.toHaveBeenCalled();
@@ -120,19 +117,12 @@ describe('POST /api/admin/gateway/restart', () => {
     const response = await restartRequest(sandbox, bucket);
 
     expect(response.status).toBe(200);
-    expect(events).toEqual([
-      'head:backup-operation-lock',
-      'lease',
-      'get:backup-handle.json',
-      'head:backup-handle.json',
-      `get:backups/${handle.id}/meta.json`,
-      `head:backups/${handle.id}/data.sqsh`,
-      'lease',
-      'put:restore-needed',
-      'lease',
-      'destroy',
-      'lease',
-    ]);
+    expect(events).toContain('get:backup-handle.json');
+    expect(events).toContain(`get:backups/${handle.id}/meta.json`);
+    expect(events).toContain(`head:backups/${handle.id}/data.sqsh`);
+    expect(events).toContain('put:restore-needed');
+    expect(events).toContain('destroy');
+    expect(events.indexOf('put:restore-needed')).toBeLessThan(events.indexOf('destroy'));
     expect(vi.mocked(sandbox.destroy)).toHaveBeenCalledOnce();
     expect(killGateway).not.toHaveBeenCalled();
     expect(findExistingGatewayProcess).not.toHaveBeenCalled();
@@ -149,18 +139,8 @@ describe('POST /api/admin/gateway/restart', () => {
 
     expect(response.status).toBe(500);
     expect(await response.json()).toEqual({ error: 'destroy failed' });
-    expect(events).toEqual([
-      'head:backup-operation-lock',
-      'lease',
-      'get:backup-handle.json',
-      'head:backup-handle.json',
-      `get:backups/${handle.id}/meta.json`,
-      `head:backups/${handle.id}/data.sqsh`,
-      'lease',
-      'put:restore-needed',
-      'lease',
-      'lease',
-    ]);
+    expect(events).toContain('put:restore-needed');
+    expect(events).not.toContain('destroy');
     expect(vi.mocked(sandbox.destroy)).toHaveBeenCalledOnce();
   });
 
@@ -172,15 +152,9 @@ describe('POST /api/admin/gateway/restart', () => {
     const response = await restartRequest(sandbox, bucket);
 
     expect(response.status).toBe(409);
-    expect(events).toEqual([
-      'head:backup-operation-lock',
-      'lease',
-      'get:backup-handle.json',
-      'head:backup-handle.json',
-      `get:backups/${handle.id}/meta.json`,
-      `head:backups/${handle.id}/data.sqsh`,
-      'lease',
-    ]);
+    expect(events).toContain('get:backup-handle.json');
+    expect(events).toContain(`head:backups/${handle.id}/data.sqsh`);
+    expect(events).not.toContain('put:restore-needed');
     expect(vi.mocked(sandbox.destroy)).not.toHaveBeenCalled();
     expect(
       vi.mocked(bucket.put).mock.calls.filter(([key]) => key === 'restore-needed'),

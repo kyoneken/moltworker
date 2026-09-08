@@ -171,6 +171,15 @@ export async function cancelBackupRestore(): Promise<{ success: boolean; message
   return apiRequest('/storage/restore/cancel', { method: 'POST' });
 }
 
+export async function setBackupRetention(
+  retention: number,
+): Promise<{ success: boolean; retention: number; error?: string }> {
+  return apiRequest('/storage/retention', {
+    method: 'PUT',
+    body: JSON.stringify({ retention }),
+  });
+}
+
 export interface AdminModelRecord {
   id: string;
   name: string;

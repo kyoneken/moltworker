@@ -8,6 +8,8 @@ import {
   createSnapshotUnderLease,
   getBackupStatus,
   hasUsableBackup,
+  isValidRetention,
+  reconcileBackupAuthority,
   reserveRestore,
   setBackupRetention,
   signalRestoreNeeded,
@@ -322,11 +324,11 @@ adminApi.post('/storage/restore/cancel', async (c) => {
 
 adminApi.put('/storage/retention', async (c) => {
   const body = await c.req.json<{ retention?: number }>();
-  if (typeof body.retention !== 'number') {
-    return c.json({ error: 'retention must be a number' }, 400);
+  if (!isValidRetention(body.retention)) {
+    return c.json({ error: 'retention must be an integer from 3 to 20' }, 400);
   }
-  await setBackupRetention(c.env.BACKUP_BUCKET, body.retention);
-  return c.json({ success: true, retention: body.retention });
+  const retention = await setBackupRetention(c.env.BACKUP_BUCKET, body.retention);
+  return c.json({ success: true, retention });
 });
 
 // POST /api/admin/gateway/restart - Recreate the sandbox after verifying R2 backup data
@@ -335,6 +337,8 @@ adminApi.post('/gateway/restart', async (c) => {
 
   try {
     return await withBackupOperationLease(c.env.BACKUP_BUCKET, async (lease) => {
+      await reconcileBackupAuthority(c.env.BACKUP_BUCKET);
+      await lease.renew();
       const backupAvailable = await hasUsableBackup(c.env.BACKUP_BUCKET);
       if (!backupAvailable) {
         return c.json(

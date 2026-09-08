@@ -81,3 +81,15 @@ where
 * result.configured == true
 * result.generations is an array
 * result.generations.length >= 3
+
+===
+recreate refuses a non-restorable handle
+===
+WORKER_URL=$(cat "$CCTR_FIXTURE_DIR/worker-url.txt")
+./curl-auth -s -X POST "$WORKER_URL/debug/r2-put?key=backup-handle.json" -d '{"id":"not-a-uuid","dir":"/home/openclaw"}' >/dev/null
+./curl-auth -s -X POST "$WORKER_URL/api/admin/gateway/restart" | jq .
+---
+{{ result: json object }}
+---
+where
+* result.error matches /backup/i

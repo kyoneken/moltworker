@@ -9,6 +9,7 @@ import {
   validateBackupGeneration,
   reserveBackupRestore,
   cancelBackupRestore,
+  setBackupRetention,
   AuthError,
   type PendingDevice,
   type PairedDevice,
@@ -284,6 +285,36 @@ export default function AdminPage() {
                   </span>
                 </div>
               ))}
+              <div className="backup-history-row">
+                <span>Keep generations: {storageStatus.retention ?? 5}</span>
+                <form
+                  onSubmit={async (event) => {
+                    event.preventDefault();
+                    const form = event.currentTarget;
+                    const value = Number(new FormData(form).get('retention'));
+                    try {
+                      await setBackupRetention(value);
+                      await fetchStorageStatus();
+                    } catch (err) {
+                      setError(err instanceof Error ? err.message : 'Retention update failed');
+                    }
+                  }}
+                >
+                  <input
+                    name="retention"
+                    type="number"
+                    min={3}
+                    max={20}
+                    step={1}
+                    defaultValue={storageStatus.retention ?? 5}
+                    className="btn btn-secondary btn-sm"
+                    style={{ width: '4.5rem' }}
+                  />
+                  <button className="btn btn-secondary btn-sm" type="submit">
+                    Save retention
+                  </button>
+                </form>
+              </div>
               {storageStatus.pendingRestoreId && (
                 <button
                   className="btn btn-secondary btn-sm"

@@ -3,7 +3,7 @@ import type { OpenClawEnv } from '../types';
 import { buildSandboxOptions } from '../index';
 import { prepareGateway } from '../gateway';
 import { shouldWakeContainer, DEFAULT_LEAD_TIME_MS, CRON_STORE_R2_KEY } from './wake';
-import { createSnapshot } from '../persistence';
+import { createSnapshot, recordBackupError } from '../persistence';
 
 /**
  * Wake the container if OpenClaw has upcoming cron jobs.
@@ -39,14 +39,19 @@ export async function maybeWakeForOpenClawJobs(env: OpenClawEnv): Promise<void> 
  * Take or skip a Sandbox snapshot. Independent of OpenClaw wake.
  */
 export async function maybeCreateScheduledSnapshot(env: OpenClawEnv): Promise<void> {
-  const sandbox = getSandbox(env.Sandbox, 'openclaw', buildSandboxOptions(env));
-  await prepareGateway(sandbox, env);
-  const result = await createSnapshot(sandbox, env.BACKUP_BUCKET, 'cron');
-  if (result.skipped) {
-    console.log('[CRON] Snapshot skipped; fingerprint unchanged');
-    return;
+  try {
+    const sandbox = getSandbox(env.Sandbox, 'openclaw', buildSandboxOptions(env));
+    await prepareGateway(sandbox, env);
+    const result = await createSnapshot(sandbox, env.BACKUP_BUCKET, 'cron');
+    if (result.skipped) {
+      console.log('[CRON] Snapshot skipped; fingerprint unchanged');
+      return;
+    }
+    console.log(`[CRON] Snapshot created ${result.id}`);
+  } catch (error) {
+    await recordBackupError(env.BACKUP_BUCKET, 'scheduled-snapshot-failed');
+    throw error;
   }
-  console.log(`[CRON] Snapshot created ${result.id}`);
 }
 
 /**

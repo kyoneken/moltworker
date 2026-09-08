@@ -345,18 +345,47 @@ function parseManifest(value: unknown): BackupManifest | null {
   };
 }
 
+type ManifestRead =
+  | { status: 'missing' }
+  | { status: 'corrupt'; etag: string }
+  | { status: 'ok'; manifest: BackupManifest; etag: string };
+
+async function readManifest(bucket: R2Bucket): Promise<ManifestRead> {
+  const obj = await bucket.get(MANIFEST_KEY);
+  if (!obj) return { status: 'missing' };
+  try {
+    const manifest = parseManifest(await obj.json());
+    if (!manifest) return { status: 'corrupt', etag: obj.etag };
+    return { status: 'ok', manifest, etag: obj.etag };
+  } catch {
+    return { status: 'corrupt', etag: obj.etag };
+  }
+}
+
 async function getManifestWithEtag(
   bucket: R2Bucket,
 ): Promise<{ manifest: BackupManifest; etag: string } | null> {
-  const obj = await bucket.get(MANIFEST_KEY);
-  if (!obj) return null;
-  try {
-    const manifest = parseManifest(await obj.json());
-    if (!manifest) return null;
-    return { manifest, etag: obj.etag };
-  } catch {
-    return null;
+  const read = await readManifest(bucket);
+  if (read.status !== 'ok') return null;
+  return { manifest: read.manifest, etag: read.etag };
+}
+
+async function commitManifestUpdate(
+  bucket: R2Bucket,
+  update: (current: BackupManifest) => BackupManifest,
+): Promise<boolean> {
+  /* eslint-disable no-await-in-loop -- bounded manifest CAS retries */
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    const stored = await getManifestWithEtag(bucket);
+    const written = await putManifest(
+      bucket,
+      update(stored?.manifest ?? emptyManifest()),
+      stored?.etag ?? null,
+    );
+    if (written) return true;
   }
+  /* eslint-enable no-await-in-loop */
+  return false;
 }
 
 async function putManifest(
@@ -447,36 +476,60 @@ async function ensureRestoreMarker(bucket: R2Bucket, needed: boolean): Promise<v
  * Load or migrate the manifest, then make handle and restore-needed match it.
  * Manifest is the commit log; handle/marker lag is repaired forward.
  */
+function migratedGeneration(handle: { id: string; dir: string }): BackupGeneration {
+  return {
+    id: handle.id,
+    dir: handle.dir,
+    createdAt: new Date().toISOString(),
+    ttl: SNAPSHOT_TTL_SECONDS,
+    sizeBytes: 0,
+    archiveEtag: null,
+    source: 'migrated',
+    verification: 'legacy',
+  };
+}
+
+async function hydrateMigratedGeneration(
+  bucket: R2Bucket,
+  generation: BackupGeneration,
+): Promise<BackupGeneration> {
+  const data = await bucket.head(`backups/${generation.id}/data.sqsh`);
+  if (data && Number.isFinite(data.size) && data.size > 0) {
+    generation.sizeBytes = data.size;
+    if (data.etag) generation.archiveEtag = data.etag;
+  }
+  return generation;
+}
+
 export async function reconcileBackupAuthority(bucket: R2Bucket): Promise<BackupManifest> {
-  const storedManifest = await getManifestWithEtag(bucket);
   const storedHandle = await getStoredHandleWithEtag(bucket);
+  const read = await readManifest(bucket);
+  let manifest = emptyManifest();
 
-  let manifest = storedManifest?.manifest ?? emptyManifest();
-
-  if (!storedManifest && storedHandle && isBackupHandle(storedHandle.handle)) {
+  if (read.status === 'ok') {
+    manifest = read.manifest;
+  } else if (storedHandle && isBackupHandle(storedHandle.handle)) {
+    const generation = await hydrateMigratedGeneration(
+      bucket,
+      migratedGeneration(storedHandle.handle),
+    );
     manifest = {
       ...emptyManifest(),
       currentId: storedHandle.handle.id,
       lastLiveId: storedHandle.handle.id,
-      generations: [
-        {
-          id: storedHandle.handle.id,
-          dir: storedHandle.handle.dir,
-          createdAt: new Date().toISOString(),
-          ttl: SNAPSHOT_TTL_SECONDS,
-          sizeBytes: 0,
-          archiveEtag: null,
-          source: 'migrated',
-          verification: 'legacy',
-        },
-      ],
+      lastError:
+        read.status === 'corrupt'
+          ? { at: new Date().toISOString(), code: 'corrupt-manifest' }
+          : null,
+      generations: [generation],
     };
-    const data = await bucket.head(`backups/${storedHandle.handle.id}/data.sqsh`);
-    if (data && Number.isFinite(data.size) && data.size > 0) {
-      manifest.generations[0].sizeBytes = data.size;
-      if (data.etag) manifest.generations[0].archiveEtag = data.etag;
-    }
-    await putManifest(bucket, manifest, null);
+    await putManifest(bucket, manifest, read.status === 'corrupt' ? read.etag : null);
+  } else if (read.status === 'corrupt') {
+    manifest = {
+      ...emptyManifest(),
+      lastError: { at: new Date().toISOString(), code: 'corrupt-manifest' },
+    };
+    await putManifest(bucket, manifest, read.etag);
   }
 
   const targetId = authorityHandleId(manifest);
@@ -493,38 +546,6 @@ export async function reconcileBackupAuthority(bucket: R2Bucket): Promise<Backup
   return manifest;
 }
 
-function isRestorableBackupMetadata(
-  value: unknown,
-  handle: { id: string; dir: string },
-): value is { id: string; dir: string; createdAt: string; ttl: number; sizeBytes: number } {
-  if (!value || typeof value !== 'object') return false;
-  const metadata = value as {
-    id?: unknown;
-    dir?: unknown;
-    createdAt?: unknown;
-    ttl?: unknown;
-    sizeBytes?: unknown;
-  };
-  if (
-    metadata.id !== handle.id ||
-    metadata.dir !== handle.dir ||
-    typeof metadata.createdAt !== 'string' ||
-    typeof metadata.ttl !== 'number' ||
-    !Number.isFinite(metadata.ttl) ||
-    metadata.ttl <= 0 ||
-    typeof metadata.sizeBytes !== 'number' ||
-    !Number.isFinite(metadata.sizeBytes) ||
-    metadata.sizeBytes <= 0
-  ) {
-    return false;
-  }
-  const createdAt = new Date(metadata.createdAt).getTime();
-  return (
-    Number.isFinite(createdAt) &&
-    Date.now() + BACKUP_EXPIRY_BUFFER_MS <= createdAt + metadata.ttl * 1000
-  );
-}
-
 /**
  * Confirm that a complete persisted Sandbox backup exists before a deliberate
  * container recreation. The SDK owns these backup object keys; this check is
@@ -532,27 +553,26 @@ function isRestorableBackupMetadata(
  */
 export async function hasUsableBackup(bucket: R2Bucket): Promise<boolean> {
   try {
-    const handleObject = await bucket.get(HANDLE_KEY);
-    if (!handleObject) return false;
+    const read = await readManifest(bucket);
+    const storedHandle = await getStoredHandle(bucket);
+    const targetId =
+      read.status === 'ok' ? authorityHandleId(read.manifest) : storedHandle?.id ?? null;
+    if (!targetId) return false;
 
-    const handle: unknown = await handleObject.json();
+    const generation =
+      read.status === 'ok' ? read.manifest.generations.find((row) => row.id === targetId) : undefined;
+    const handle = {
+      id: targetId,
+      dir: generation?.dir ?? storedHandle?.dir ?? BACKUP_DIR,
+    };
     if (!isBackupHandle(handle)) return false;
 
-    const handleMetadata = await bucket.head(HANDLE_KEY);
-    if (!handleMetadata) return false;
-
-    const metadataObject = await bucket.get(`backups/${handle.id}/meta.json`);
-    if (!metadataObject) return false;
-    const metadata: unknown = await metadataObject.json();
-    if (!isRestorableBackupMetadata(metadata, handle)) return false;
-
-    const backupData = await bucket.head(`backups/${handle.id}/data.sqsh`);
-    return (
-      backupData !== null &&
-      Number.isFinite(backupData.size) &&
-      backupData.size > 0 &&
-      backupData.size === metadata.sizeBytes
+    const health = await classifyBackupHealth(
+      bucket,
+      handle,
+      generation?.verification === 'stored-etag' ? generation.archiveEtag : null,
     );
+    return health === 'valid' || health === 'near-expiry';
   } catch {
     return false;
   }
@@ -578,10 +598,10 @@ async function deleteBackupObjectsBestEffort(
   }
 }
 
-async function pruneUnprotectedGenerations(
-  bucket: R2Bucket,
-  manifest: BackupManifest,
-): Promise<BackupManifest> {
+function partitionUnprotectedGenerations(manifest: BackupManifest): {
+  kept: BackupGeneration[];
+  removed: BackupGeneration[];
+} {
   const protectedIds = protectedGenerationIds(manifest);
   const kept: BackupGeneration[] = [];
   const removed: BackupGeneration[] = [];
@@ -592,10 +612,22 @@ async function pruneUnprotectedGenerations(
       removed.push(generation);
     }
   }
+  return { kept, removed };
+}
+
+async function commitPrune(
+  bucket: R2Bucket,
+  manifest: BackupManifest,
+): Promise<BackupManifest> {
+  const { kept, removed } = partitionUnprotectedGenerations(manifest);
+  const pruned = { ...manifest, generations: kept };
+  const stored = await getManifestWithEtag(bucket);
+  const committed = await putManifest(bucket, pruned, stored?.etag ?? null);
+  if (!committed) throw new Error('Backup manifest CAS failed');
   await Promise.all(
     removed.map((generation) => deleteBackupObjectsBestEffort(bucket, generation, 'pruned')),
   );
-  return { ...manifest, generations: kept };
+  return pruned;
 }
 
 async function readCreatedBackupDetails(
@@ -654,34 +686,44 @@ export async function restoreIfNeeded(sandbox: Sandbox, bucket: R2Bucket): Promi
   }
 
   const storedHandle = await getStoredHandleWithEtag(bucket);
-  if (!storedHandle) {
+  const manifestRead = await readManifest(bucket);
+  let handle = storedHandle?.handle ?? null;
+  if (manifestRead.status === 'ok') {
+    const targetId = authorityHandleId(manifestRead.manifest);
+    if (!targetId) {
+      handle = null;
+    } else {
+      const generation = manifestRead.manifest.generations.find((row) => row.id === targetId);
+      handle = { id: targetId, dir: generation?.dir ?? BACKUP_DIR };
+    }
+  }
+  if (!handle) {
     console.log('[persistence] No backup handle found in R2, skipping restore');
     restored = true;
     return;
   }
 
-  const { handle } = storedHandle;
   console.log(`[persistence] Restoring backup ${handle.id}...`);
   const t0 = Date.now();
   try {
     await sandbox.restoreBackup(handle);
+    const committed = await commitManifestUpdate(bucket, (current) => ({
+      ...current,
+      currentId: handle.id,
+      pendingRestoreId: null,
+      lastLiveId: handle.id,
+      lastRestoreOutcome: {
+        at: new Date().toISOString(),
+        kind: 'restored',
+        backupId: handle.id,
+      },
+    }));
+    if (!committed) {
+      restored = false;
+      throw new Error('Backup manifest CAS failed while completing restore');
+    }
     await bucket.delete(RESTORE_NEEDED_KEY);
     restored = true;
-    const stored = await getManifestWithEtag(bucket);
-    if (stored) {
-      const completed: BackupManifest = {
-        ...stored.manifest,
-        currentId: handle.id,
-        pendingRestoreId: null,
-        lastLiveId: handle.id,
-        lastRestoreOutcome: {
-          at: new Date().toISOString(),
-          kind: 'restored',
-          backupId: handle.id,
-        },
-      };
-      await putManifest(bucket, completed, stored.etag);
-    }
     console.log(`[persistence] Restore complete in ${Date.now() - t0}ms`);
   } catch (err: unknown) {
     const msg = err instanceof Error ? err.message : String(err);
@@ -703,32 +745,31 @@ export async function restoreIfNeeded(sandbox: Sandbox, bucket: R2Bucket): Promi
       console.log(
         `[persistence] Backup ${handle.id} expired/gone, conditionally invalidating state`,
       );
-      const invalidated = await bucket.put(HANDLE_KEY, 'null', {
-        onlyIf: { etagMatches: storedHandle.etag },
-      });
+      const kind =
+        code === 'BACKUP_NOT_FOUND' || msg.includes('BACKUP_NOT_FOUND')
+          ? 'missing-continue'
+          : 'expired-continue';
+      const recorded = await commitManifestUpdate(bucket, (current) => ({
+        ...current,
+        currentId: current.currentId === handle.id ? null : current.currentId,
+        pendingRestoreId:
+          current.pendingRestoreId === handle.id ? null : current.pendingRestoreId,
+        lastRestoreOutcome: { at: new Date().toISOString(), kind, backupId: handle.id },
+      }));
+      if (!recorded) {
+        restored = false;
+        throw new Error('Backup manifest CAS failed while recording expired restore', {
+          cause: err,
+        });
+      }
+      const invalidated = storedHandle
+        ? await bucket.put(HANDLE_KEY, 'null', {
+            onlyIf: { etagMatches: storedHandle.etag },
+          })
+        : await bucket.put(HANDLE_KEY, 'null');
       if (invalidated) {
         await bucket.delete(RESTORE_NEEDED_KEY);
         restored = true;
-        const stored = await getManifestWithEtag(bucket);
-        if (stored) {
-          const kind = code === 'BACKUP_NOT_FOUND' || msg.includes('BACKUP_NOT_FOUND')
-            ? 'missing-continue'
-            : 'expired-continue';
-          await putManifest(
-            bucket,
-            {
-              ...stored.manifest,
-              currentId:
-                stored.manifest.currentId === handle.id ? null : stored.manifest.currentId,
-              pendingRestoreId:
-                stored.manifest.pendingRestoreId === handle.id
-                  ? null
-                  : stored.manifest.pendingRestoreId,
-              lastRestoreOutcome: { at: new Date().toISOString(), kind, backupId: handle.id },
-            },
-            stored.etag,
-          );
-        }
       } else {
         restored = false;
         throw new Error(
@@ -863,10 +904,10 @@ export async function createSnapshotUnderLease(
   }
 
   await lease.renew();
-  const pruned = await pruneUnprotectedGenerations(bucket, nextManifest);
-  if (pruned.generations.length !== nextManifest.generations.length) {
-    const latest = await getManifestWithEtag(bucket);
-    await putManifest(bucket, pruned, latest?.etag ?? null);
+  try {
+    await commitPrune(bucket, { ...nextManifest, lastError: null });
+  } catch (error) {
+    console.warn('[persistence] Prune lagged; extra generations may remain', error);
   }
 
   console.log(`[persistence] Backup ${handle.id} created in ${Date.now() - t0}ms`);
@@ -930,10 +971,14 @@ export async function getBackupStatus(bucket: R2Bucket): Promise<BackupStatus> {
   );
 
   const current = generations.find((row) => row.id === (handle?.id ?? manifest.currentId));
+  const health =
+    manifest.lastError?.code === 'corrupt-manifest' && generations.length === 0
+      ? 'corrupt'
+      : (current?.health ?? (handle ? await classifyBackupHealth(bucket, handle) : 'none'));
   return {
     lastBackupId: handle?.id ?? manifest.currentId,
     lastSync: metadata?.uploaded.toISOString() ?? null,
-    health: current?.health ?? (handle ? await classifyBackupHealth(bucket, handle) : 'none'),
+    health,
     remainingTtlSeconds: current?.remainingTtlSeconds ?? null,
     pendingRestoreId: manifest.pendingRestoreId,
     lastSkipAt: manifest.lastSkipAt,
@@ -1005,15 +1050,27 @@ export async function cancelRestoreReservation(bucket: R2Bucket): Promise<void> 
   });
 }
 
-export async function setBackupRetention(bucket: R2Bucket, retention: number): Promise<void> {
+export function isValidRetention(value: unknown): value is number {
+  return typeof value === 'number' && Number.isInteger(value) && value >= MIN_RETENTION && value <= MAX_RETENTION;
+}
+
+export async function setBackupRetention(bucket: R2Bucket, retention: number): Promise<number> {
+  if (!isValidRetention(retention)) {
+    throw new Error(`retention must be an integer from ${MIN_RETENTION} to ${MAX_RETENTION}`);
+  }
   await withBackupOperationLease(bucket, async () => {
     const manifest = await reconcileBackupAuthority(bucket);
-    const next = await pruneUnprotectedGenerations(bucket, {
-      ...manifest,
-      retention: clampRetention(retention),
-    });
-    const stored = await getManifestWithEtag(bucket);
-    const committed = await putManifest(bucket, next, stored?.etag ?? null);
+    await commitPrune(bucket, { ...manifest, retention });
+  });
+  return retention;
+}
+
+export async function recordBackupError(bucket: R2Bucket, code: string): Promise<void> {
+  await withBackupOperationLease(bucket, async () => {
+    const committed = await commitManifestUpdate(bucket, (current) => ({
+      ...current,
+      lastError: { at: new Date().toISOString(), code },
+    }));
     if (!committed) throw new Error('Backup manifest CAS failed');
   });
 }

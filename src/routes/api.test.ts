@@ -35,3 +35,24 @@ describe('GET /api/admin/storage', () => {
     });
   });
 });
+
+describe('PUT /api/admin/storage/retention', () => {
+  it('rejects values outside 3-20 without writing', async () => {
+    const put = vi.fn();
+    const bucket = {
+      get: vi.fn().mockResolvedValue(null),
+      head: vi.fn().mockResolvedValue(null),
+      put,
+    } as unknown as R2Bucket;
+
+    const response = await api.request(
+      '/admin/storage/retention',
+      { method: 'PUT', body: JSON.stringify({ retention: 100 }) },
+      createMockEnv({ DEV_MODE: 'true', BACKUP_BUCKET: bucket }),
+    );
+
+    expect(response.status).toBe(400);
+    expect(await response.json()).toEqual({ error: 'retention must be an integer from 3 to 20' });
+    expect(put.mock.calls.filter(([key]) => key === 'backup-manifest.json')).toHaveLength(0);
+  });
+});

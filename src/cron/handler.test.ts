@@ -3,12 +3,15 @@ import { createMockEnv } from '../test-utils';
 
 const { getSandbox } = vi.hoisted(() => ({ getSandbox: vi.fn() }));
 const { prepareGateway } = vi.hoisted(() => ({ prepareGateway: vi.fn() }));
-const { createSnapshot } = vi.hoisted(() => ({ createSnapshot: vi.fn() }));
+const { createSnapshot, recordBackupError } = vi.hoisted(() => ({
+  createSnapshot: vi.fn(),
+  recordBackupError: vi.fn(),
+}));
 
 vi.mock('@cloudflare/sandbox', () => ({ getSandbox }));
 vi.mock('../gateway/lifecycle', () => ({ prepareGateway }));
 vi.mock('../gateway', () => ({ prepareGateway }));
-vi.mock('../persistence', () => ({ createSnapshot }));
+vi.mock('../persistence', () => ({ createSnapshot, recordBackupError }));
 
 import { handleScheduled } from './handler';
 
@@ -103,5 +106,17 @@ describe('handleScheduled', () => {
     await handleScheduled(createMockEnv({ BACKUP_BUCKET: bucket }));
 
     expect(createSnapshot).toHaveBeenCalled();
+  });
+
+  it('records lastError and rethrows when the scheduled snapshot fails', async () => {
+    const sandbox = {};
+    getSandbox.mockReturnValue(sandbox);
+    createSnapshot.mockRejectedValue(new Error('snapshot failed'));
+    recordBackupError.mockResolvedValue(undefined);
+    const bucket = { get: vi.fn().mockResolvedValue(null) } as unknown as R2Bucket;
+
+    await handleScheduled(createMockEnv({ BACKUP_BUCKET: bucket }));
+
+    expect(recordBackupError).toHaveBeenCalledWith(bucket, 'scheduled-snapshot-failed');
   });
 });
