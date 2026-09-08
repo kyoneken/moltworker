@@ -1,18 +1,18 @@
-# バックアップ復旧訓練
+# Backup restore drill
 
-事前検証（`POST /api/admin/storage/generations/:id/validate`）は復旧訓練ではありません。確認するのは UUID、metadata の TTL（SDK の 60 秒バッファ込み）、アーカイブサイズ、保存済みなら R2 の etag だけです。multipart etag はファイル全体の MD5 ではなく、事前検証は squashfs を展開せず、アプリデータが使えることも証明しません。
+事前検証 (`POST /api/admin/storage/generations/:id/validate`) is not a restore drill. It only checks UUID, metadata TTL (with the SDK 60s buffer), archive size, and the R2 object etag when one was stored. A multipart etag is not a whole-file MD5, and preflight does not extract squashfs or prove application data.
 
-## 隔離環境での復旧訓練
+## Isolated restore drill
 
-1. 対象世代の健全性が `有効` または `期限間近`（API 値は `valid` / `near-expiry`）であることを確認する。
-2. その世代を復元予約する。Admin UI は「復元予約中」と出し、「復元完了」とは出さない。
-3. コンテナを再作成し、cold start が `restore-needed` を消費するようにする。
-4. ゲートウェイ準備後に次を確認する。
-   - `/_admin/` にペア済みデバイスが表示される
-   - 既存セッションが続く
-   - `/home/openclaw/clawd` 配下の既知の workspace ファイルがある
-5. 時刻を記録する。`expired-continue` や `missing-continue` の cold start を復元成功とみなさない。
+1. Confirm the generation health is `valid` or `near-expiry`.
+2. Create a 復元予約 for that generation. Admin UI must show 復元予約中, not 復元完了.
+3. Recreate the container so a cold start consumes `restore-needed`.
+4. After the gateway is ready, check:
+   - paired devices still appear in `/_admin/`
+   - an existing session continues
+   - a known workspace file under `/home/openclaw/clawd` is present
+5. Record timestamps. Do not treat an `expired-continue` or `missing-continue` cold start as a successful restore.
 
-## 履歴保持と復元可能な世代
+## Retention vs restorable copies
 
-Worker は件数上限付きの履歴を残します（既定 5 件）。SDK スナップショットの TTL は 7 日です。通常の復元経路では使えなくなったあとも、履歴行としては残ることがあります。TTL 切れで R2 オブジェクトが自動削除されるわけではなく、SDK が期限切れ restore を拒否します。
+The Worker keeps a bounded history (default 5 rows). SDK snapshot TTL is 7 days. Older history rows can remain after they are no longer restorable via the app path. R2 does not delete objects at TTL expiry; the SDK rejects expired restore.

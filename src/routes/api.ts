@@ -216,10 +216,10 @@ adminApi.get('/storage', async (c) => {
     configured: true,
     ...status,
     message: expiredContinue
-      ? '直近の cold start では以前のデータを復元していません。空の状態からの新規スナップショットは復元成功ではありません。'
+      ? 'The last cold start did not restore prior data. A later snapshot of the empty tree is not a restore.'
       : restorable
-        ? 'R2 は設定済みです。復元可否は履歴件数とは別に表示します。'
-        : 'R2 は設定済みですが、現行スナップショットは通常の復元経路では使えません。',
+        ? 'R2 storage is configured. Restorable snapshot health is shown separately from backup history.'
+        : 'R2 storage is configured, but the current snapshot is not restorable via the app path.',
   });
 });
 
@@ -248,9 +248,7 @@ adminApi.post('/storage/sync', async (c) => {
       const handle = await createSnapshotUnderLease(sandbox, c.env.BACKUP_BUCKET, lease);
       return c.json({
         success: true,
-        message: handle.skipped
-          ? '変更がないためスナップショットをスキップしました'
-          : 'スナップショットを作成しました',
+        message: handle.skipped ? 'Snapshot skipped; fingerprint unchanged' : 'Snapshot created successfully',
         backupId: handle.id,
         skipped: handle.skipped === true,
         debug: { mountState, dirContents },
@@ -306,31 +304,26 @@ adminApi.post('/storage/generations/:id/restore', async (c) => {
     return c.json({
       success: true,
       pendingRestoreId: id,
-      message:
-        '復元を予約しました。適用するにはコンテナを再作成してください。これは復元完了ではありません。',
+      message: 'Restore reserved. Recreate the container to apply it. This is not a completed restore.',
     });
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-    const status =
-      errorMessage.includes('not restorable') ||
-      errorMessage.includes('not found') ||
-      errorMessage.includes('復元できません') ||
-      errorMessage.includes('見つかりません')
-        ? 409
-        : 500;
+    const status = errorMessage.includes('not restorable') || errorMessage.includes('not found')
+      ? 409
+      : 500;
     return c.json({ success: false, error: errorMessage }, status);
   }
 });
 
 adminApi.post('/storage/restore/cancel', async (c) => {
   await cancelRestoreReservation(c.env.BACKUP_BUCKET);
-  return c.json({ success: true, message: '復元予約を取り消しました' });
+  return c.json({ success: true, message: 'Restore reservation cancelled' });
 });
 
 adminApi.put('/storage/retention', async (c) => {
   const body = await c.req.json<{ retention?: number }>();
   if (typeof body.retention !== 'number') {
-    return c.json({ error: 'retention は数値である必要があります' }, 400);
+    return c.json({ error: 'retention must be a number' }, 400);
   }
   await setBackupRetention(c.env.BACKUP_BUCKET, body.retention);
   return c.json({ success: true, retention: body.retention });
@@ -347,7 +340,7 @@ adminApi.post('/gateway/restart', async (c) => {
         return c.json(
           {
             error:
-              '復元可能なバックアップがありません。コンテナ再作成の前にバックアップを作成してください。',
+              'No persisted backup is available. Create a backup before recreating the container.',
           },
           409,
         );
@@ -362,7 +355,7 @@ adminApi.post('/gateway/restart', async (c) => {
       return c.json({
         success: true,
         message:
-          'コンテナ再作成を開始しました。次回アクセス時に R2 から復元を試みます。接続中のクライアントは一時切断されます。',
+          'Container recreation initiated. On next access, state will be restored from R2. All clients will be temporarily disconnected.',
       });
     });
   } catch (error) {

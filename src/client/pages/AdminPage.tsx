@@ -23,7 +23,7 @@ function ButtonSpinner() {
 }
 
 function formatSyncTime(isoString: string | null) {
-  if (!isoString) return 'なし';
+  if (!isoString) return 'Never';
   try {
     const date = new Date(isoString);
     return date.toLocaleString();
@@ -35,38 +35,6 @@ function formatSyncTime(isoString: string | null) {
 function formatTimestamp(ts: number) {
   const date = new Date(ts);
   return date.toLocaleString();
-}
-
-function healthLabel(health: string | undefined): string {
-  switch (health) {
-    case 'valid':
-      return '有効';
-    case 'near-expiry':
-      return '期限間近';
-    case 'expired':
-      return '期限切れ';
-    case 'missing':
-      return '欠落';
-    case 'corrupt':
-      return '破損';
-    case 'none':
-      return 'なし';
-    default:
-      return health ?? '不明';
-  }
-}
-
-function sourceLabel(source: string): string {
-  switch (source) {
-    case 'manual':
-      return '手動';
-    case 'cron':
-      return '定期';
-    case 'migrated':
-      return '移行';
-    default:
-      return source;
-  }
 }
 
 function formatTimeAgo(ts: number) {
@@ -162,7 +130,7 @@ export default function AdminPage() {
   const handleRestartGateway = async () => {
     if (
       !confirm(
-        'コンテナを再作成しますか？次回アクセス時に R2 からの復元を試みます。接続中のクライアントは一時切断されます。',
+        'Recreate the container? On next access, its state will be restored from R2. All clients will be temporarily disconnected.',
       )
     ) {
       return;
@@ -173,13 +141,13 @@ export default function AdminPage() {
       if (result.success) {
         setError(null);
         alert(
-          'コンテナ再作成を開始しました。次回アクセス時に R2 からの復元を試みます。接続中のクライアントは一時切断されます。',
+          'Container recreation initiated. On next access, state will be restored from R2. All clients will be temporarily disconnected.',
         );
       } else {
-        setError(result.error || 'ゲートウェイの再作成に失敗しました');
+        setError(result.error || 'Failed to restart gateway');
       }
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'ゲートウェイの再作成に失敗しました');
+      setError(err instanceof Error ? err.message : 'Failed to restart gateway');
     } finally {
       setRestartInProgress(false);
     }
@@ -193,10 +161,10 @@ export default function AdminPage() {
         await fetchStorageStatus();
         setError(null);
       } else {
-        setError(result.error || 'バックアップに失敗しました');
+        setError(result.error || 'Sync failed');
       }
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'バックアップに失敗しました');
+      setError(err instanceof Error ? err.message : 'Failed to sync');
     } finally {
       setSyncInProgress(false);
     }
@@ -216,21 +184,21 @@ export default function AdminPage() {
       {storageStatus && !storageStatus.configured && (
         <div className="warning-banner">
           <div className="warning-content">
-            <strong>R2 ストレージが未設定です</strong>
+            <strong>R2 Storage Not Configured</strong>
             <p>
-              コンテナ再起動時にペア済みデバイスと会話が失われます。永続化するには R2
-              を設定してください。手順は{' '}
+              Paired devices and conversations will be lost when the container restarts. To enable
+              persistent storage, configure R2 credentials. See the{' '}
               <a
-                href="https://github.com/kyoneken/moltworker"
+                href="https://github.com/cloudflare/moltworker"
                 target="_blank"
                 rel="noopener noreferrer"
               >
                 README
               </a>{' '}
-              を参照してください。
+              for setup instructions.
             </p>
             {storageStatus.missing && (
-              <p className="missing-secrets">不足: {storageStatus.missing.join(', ')}</p>
+              <p className="missing-secrets">Missing: {storageStatus.missing.join(', ')}</p>
             )}
           </div>
         </div>
@@ -252,8 +220,8 @@ export default function AdminPage() {
             <div className="storage-info">
               <span>{storageStatus.message}</span>
               <span className="last-sync">
-                最終バックアップ: {formatSyncTime(storageStatus.lastSync)} · 健全性:{' '}
-                {healthLabel(storageStatus.health)}
+                Last backup: {formatSyncTime(storageStatus.lastSync)} · health:{' '}
+                {storageStatus.health ?? 'unknown'}
               </span>
               {storageStatus.pendingRestoreId && (
                 <span className="last-sync">復元予約中: {storageStatus.pendingRestoreId}</span>
@@ -261,7 +229,8 @@ export default function AdminPage() {
               {(storageStatus.lastRestoreOutcome?.kind === 'expired-continue' ||
                 storageStatus.lastRestoreOutcome?.kind === 'missing-continue') && (
                 <span className="last-sync">
-                  期限切れなどのため以前のデータは復元されていません。空の状態からの新規スナップショットは復元成功ではありません。
+                  Cold start did not restore prior data. A newer snapshot of the empty tree is not a
+                  restore.
                 </span>
               )}
             </div>
@@ -271,7 +240,7 @@ export default function AdminPage() {
               disabled={syncInProgress}
             >
               {syncInProgress && <ButtonSpinner />}
-              {syncInProgress ? 'バックアップ中...' : '今すぐバックアップ'}
+              {syncInProgress ? 'Syncing...' : 'Backup Now'}
             </button>
           </div>
           {storageStatus.generations && storageStatus.generations.length > 0 && (
@@ -279,8 +248,7 @@ export default function AdminPage() {
               {storageStatus.generations.map((generation) => (
                 <div key={generation.id} className="backup-history-row">
                   <span>
-                    {generation.id.slice(0, 8)} · {healthLabel(generation.health)} ·{' '}
-                    {sourceLabel(generation.source)}
+                    {generation.id.slice(0, 8)} · {generation.health} · {generation.source}
                     {generation.isPendingRestore ? ' · 復元予約' : ''}
                   </span>
                   <span>
@@ -289,9 +257,9 @@ export default function AdminPage() {
                       onClick={async () => {
                         try {
                           const result = await validateBackupGeneration(generation.id);
-                          setError(`事前検証 ${result.id}: ${healthLabel(result.health)}`);
+                          setError(`事前検証 ${result.id}: ${result.health}`);
                         } catch (err) {
-                          setError(err instanceof Error ? err.message : '事前検証に失敗しました');
+                          setError(err instanceof Error ? err.message : 'Validate failed');
                         }
                       }}
                     >
@@ -300,18 +268,14 @@ export default function AdminPage() {
                     <button
                       className="btn btn-secondary btn-sm"
                       onClick={async () => {
-                        if (
-                          !confirm(
-                            'この世代を復元予約しますか？適用にはコンテナ再作成が必要です。',
-                          )
-                        ) {
+                        if (!confirm('Reserve restore of this generation? Recreate is still required.')) {
                           return;
                         }
                         try {
                           await reserveBackupRestore(generation.id);
                           await fetchStorageStatus();
                         } catch (err) {
-                          setError(err instanceof Error ? err.message : '復元予約に失敗しました');
+                          setError(err instanceof Error ? err.message : 'Restore reserve failed');
                         }
                       }}
                     >
@@ -328,7 +292,7 @@ export default function AdminPage() {
                     await fetchStorageStatus();
                   }}
                 >
-                  復元予約を取り消す
+                  Cancel restore reservation
                 </button>
               )}
             </div>
@@ -347,12 +311,13 @@ export default function AdminPage() {
             disabled={restartInProgress}
           >
             {restartInProgress && <ButtonSpinner />}
-            {restartInProgress ? '再作成中...' : 'コンテナを再作成'}
+            {restartInProgress ? 'Recreating...' : 'Recreate Container'}
           </button>
         </div>
         <p className="hint">
-          設定反映や復元予約の適用のためにコンテナを再作成します。再作成成功はデータ復元成功ではありません。先にスナップショットの健全性を確認してください。期限切れの SDK
-          バックアップは、R2 上に残っていても通常の復元経路では使えません。
+          Recreate the container to apply configuration changes or consume a restore reservation. This
+          is not proof that prior data was restored; check snapshot health first. Expired SDK backups
+          are not restorable via the app path even if R2 objects remain.
         </p>
       </section>
 
