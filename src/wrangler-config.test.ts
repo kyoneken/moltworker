@@ -5,10 +5,12 @@ import { describe, expect, it } from 'vitest';
 const wranglerConfigPath = resolve(process.cwd(), 'wrangler.jsonc');
 
 describe('wrangler configuration', () => {
-  it('does not configure autonomous cron triggers', () => {
+  it('configures exactly one six-hour backup cron', () => {
     const wranglerConfig = readFileSync(wranglerConfigPath, 'utf8');
 
-    expect(wranglerConfig).not.toMatch(/"triggers"\s*:/);
-    expect(wranglerConfig).not.toMatch(/"crons"\s*:/);
+    expect(wranglerConfig).toMatch(/"triggers"\s*:/);
+    expect(wranglerConfig).toMatch(/"crons"\s*:\s*\[\s*"0 \*\/6 \* \* \*"\s*\]/);
+    expect(wranglerConfig.match(/"crons"\s*:/g)).toHaveLength(1);
+    expect(wranglerConfig).not.toMatch(/\* \* \* \* \*/);
   });
 });

@@ -3,29 +3,22 @@ import type { OpenClawEnv } from '../types';
 import { buildSandboxOptions } from '../index';
 import { prepareGateway } from '../gateway';
 import { shouldWakeContainer, DEFAULT_LEAD_TIME_MS, CRON_STORE_R2_KEY } from './wake';
+import { createSnapshot } from '../persistence';
 
 /**
- * Handle Workers Cron Trigger: wake the container if OpenClaw has upcoming cron jobs.
- *
- * Reads the cron job store from R2 (synced by the background sync loop in the container)
- * and checks if any job is scheduled to fire within the lead time window. If so, wakes
- * the container so OpenClaw's internal timers can fire on time.
- *
- * Configure via environment variables:
- * - CRON_WAKE_AHEAD_MINUTES: How many minutes before a cron job to wake (default: 10)
- *
- * Configure the check interval in wrangler.jsonc triggers.crons (default: every 1 minute).
+ * Wake the container if OpenClaw has upcoming cron jobs.
+ * Missing cron store or no imminent job is a no-op and must not block snapshots.
  */
-export async function handleScheduled(env: OpenClawEnv): Promise<void> {
+export async function maybeWakeForOpenClawJobs(env: OpenClawEnv): Promise<void> {
   const cronStoreObject = await env.BACKUP_BUCKET.get(CRON_STORE_R2_KEY);
   if (!cronStoreObject) {
-    console.log('[CRON] No cron store found in R2, skipping');
+    console.log('[CRON] No cron store found in R2, skipping wake');
     return;
   }
 
   const cronStoreJson = await cronStoreObject.text();
   const leadMinutes = parseInt(env.CRON_WAKE_AHEAD_MINUTES || '', 10);
-  const leadTimeMs = leadMinutes > 0 ? leadMinutes * 60 * 1000 : DEFAULT_LEAD_TIME_MS;
+  const leadTimeMs = leadMinutes > 0 ? leadMinutes * 60_000 : DEFAULT_LEAD_TIME_MS;
   const nowMs = Date.now();
 
   const earliestRun = shouldWakeContainer(cronStoreJson, nowMs, leadTimeMs);
@@ -40,4 +33,35 @@ export async function handleScheduled(env: OpenClawEnv): Promise<void> {
   const sandbox = getSandbox(env.Sandbox, 'openclaw', buildSandboxOptions(env));
   await prepareGateway(sandbox, env);
   console.log('[CRON] Container woken successfully');
+}
+
+/**
+ * Take or skip a Sandbox snapshot. Independent of OpenClaw wake.
+ */
+export async function maybeCreateScheduledSnapshot(env: OpenClawEnv): Promise<void> {
+  const sandbox = getSandbox(env.Sandbox, 'openclaw', buildSandboxOptions(env));
+  await prepareGateway(sandbox, env);
+  const result = await createSnapshot(sandbox, env.BACKUP_BUCKET, 'cron');
+  if (result.skipped) {
+    console.log('[CRON] Snapshot skipped; fingerprint unchanged');
+    return;
+  }
+  console.log(`[CRON] Snapshot created ${result.id}`);
+}
+
+/**
+ * Workers Cron Trigger: OpenClaw job wake (best-effort) then backup snapshot.
+ */
+export async function handleScheduled(env: OpenClawEnv): Promise<void> {
+  try {
+    await maybeWakeForOpenClawJobs(env);
+  } catch (error) {
+    console.warn('[CRON] OpenClaw wake failed; continuing to snapshot', error);
+  }
+
+  try {
+    await maybeCreateScheduledSnapshot(env);
+  } catch (error) {
+    console.warn('[CRON] Scheduled snapshot failed', error);
+  }
 }

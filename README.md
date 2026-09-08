@@ -264,7 +264,9 @@ R2 storage uses a backup/restore approach for simplicity:
 
 **In the admin UI:**
 - Click "Backup Now" to create an immediate snapshot
-- Verify the operation returns a backup handle before relying on persistence
+- History lists retained generations. History count is not the number of SDK-restorable copies; TTL is 7 days and expired snapshots are not restorable via the app path even if R2 objects remain
+- 事前検証 checks UUID/metadata/TTL/size/etag only. A restore drill is a separate isolated restore that checks paired devices, sessions, and a workspace file. See `docs/backup-restore-drill.md`
+- 復元予約 selects a generation; Recreate consumes it. That is not "restore complete" until cold restore succeeds
 
 If the bucket or binding is absent, the container still runs but its data is ephemeral and can be lost on restart.
 

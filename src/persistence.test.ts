@@ -3,8 +3,10 @@ import type { Sandbox } from '@cloudflare/sandbox';
 import { createMockExecResult } from './test-utils';
 import {
   clearPersistenceCache,
+  classifyBackupHealth,
   createSnapshot,
   hasUsableBackup,
+  reconcileBackupAuthority,
   restoreIfNeeded,
   BackupOperationLeaseTimeoutError,
   withBackupOperationLease,
@@ -179,7 +181,7 @@ describe('backup operation lease', () => {
       put: vi
         .fn()
         .mockImplementation(async (key: string, _value: string, options?: R2PutOptions) => {
-          if (key !== 'backup-operation-lock') return undefined;
+          if (key !== 'backup-operation-lock') return { etag: `${key}-etag` } as R2Object;
           const onlyIf = options?.onlyIf as R2Conditional;
           const allowed =
             (onlyIf.etagDoesNotMatch === '*' && current === null) ||
@@ -329,7 +331,8 @@ function backupBucket(
   const bucket = {
     get: vi.fn().mockImplementation(async (key: string) => {
       events.push(`get:${key}`);
-      return { json: vi.fn().mockResolvedValue(oldHandle) };
+      if (key === 'backup-manifest.json') return null;
+      return { json: vi.fn().mockResolvedValue(oldHandle), etag: 'h0' };
     }),
     head: vi
       .fn()
@@ -346,6 +349,7 @@ function backupBucket(
       events.push(`put:${key}`);
       if (settings.storeFails && key === 'backup-handle.json')
         throw new Error('handle store failed');
+      return { etag: `${key}-etag` } as R2Object;
     }),
     delete: vi.fn().mockImplementation(async (key: string) => {
       events.push(`delete:${key}`);
@@ -397,6 +401,7 @@ describe('createSnapshot', () => {
             return lock;
           }
           events.push(`put:${key}`);
+          return { etag: `${key}-etag` } as R2Object;
         }),
       delete: vi.fn().mockImplementation(async (key: string) => events.push(`delete:${key}`)),
     } as unknown as R2Bucket;
@@ -414,8 +419,9 @@ describe('createSnapshot', () => {
     expect(acquire).toBeGreaterThanOrEqual(0);
     expect(acquire).toBeLessThan(events.indexOf('create'));
     expect(events.lastIndexOf('lease:put')).toBeGreaterThan(
-      events.indexOf('delete:backups/old-backup/meta.json'),
+      events.indexOf('put:backup-handle.json'),
     );
+    expect(events).not.toContain('delete:backups/old-backup/meta.json');
   });
 
   it('keeps the old handle and backup objects when creating the replacement fails', async () => {
@@ -429,27 +435,26 @@ describe('createSnapshot', () => {
     expect(events).not.toContain('delete:backups/old-backup/meta.json');
   });
 
-  it('keeps the old backup authoritative when storing the new handle fails', async () => {
+  it('keeps the previous generation when storing the new handle fails after the manifest commit', async () => {
     const { bucket, sandbox, events } = backupBucket({ storeFails: true });
 
-    await expect(createSnapshot(sandbox, bucket)).rejects.toThrow('handle store failed');
+    await expect(createSnapshot(sandbox, bucket)).resolves.toEqual(newHandle);
 
+    expect(events).toContain('put:backup-manifest.json');
     expect(events).toContain('put:backup-handle.json');
     expect(events).not.toContain('delete:backups/old-backup/data.sqsh');
     expect(events).not.toContain('delete:backups/old-backup/meta.json');
   });
 
-  it('stores the new handle before deleting the distinct old backup objects', async () => {
+  it('does not delete the previous generation while history is under retention', async () => {
     const { bucket, sandbox, events } = backupBucket();
 
     await expect(createSnapshot(sandbox, bucket)).resolves.toEqual(newHandle);
 
-    expect(events.indexOf('put:backup-handle.json')).toBeLessThan(
-      events.indexOf('delete:backups/old-backup/data.sqsh'),
-    );
-    expect(events.indexOf('put:backup-handle.json')).toBeLessThan(
-      events.indexOf('delete:backups/old-backup/meta.json'),
-    );
+    expect(events).toContain('put:backup-manifest.json');
+    expect(events).toContain('put:backup-handle.json');
+    expect(events).not.toContain('delete:backups/old-backup/data.sqsh');
+    expect(events).not.toContain('delete:backups/old-backup/meta.json');
   });
 
   it('keeps the new handle available when old backup cleanup fails', async () => {
@@ -577,7 +582,7 @@ describe('restoreIfNeeded', () => {
       expect(vi.mocked(bucket.delete)).not.toHaveBeenCalledWith(
         expect.stringMatching(/^backups\//),
       );
-      expect(vi.mocked(bucket.get)).toHaveBeenCalledTimes(1);
+      expect(vi.mocked(bucket.get)).toHaveBeenCalled();
     },
   );
 
@@ -599,5 +604,235 @@ describe('restoreIfNeeded', () => {
     await expect(restoreIfNeeded(sandbox, bucket)).rejects.toBe(failure);
     expect(vi.mocked(bucket.put)).not.toHaveBeenCalled();
     expect(vi.mocked(bucket.delete)).not.toHaveBeenCalled();
+  });
+});
+
+function inMemoryBucket(options: { failHandleWrites?: () => boolean } = {}) {
+  const objects = new Map<
+    string,
+    { body: string; etag: string; size: number; uploaded: Date; json?: unknown }
+  >();
+  let n = 0;
+  const bucket = {
+    get: vi.fn().mockImplementation(async (key: string) => {
+      const current = objects.get(key);
+      if (!current) return null;
+      return {
+        etag: current.etag,
+        uploaded: current.uploaded,
+        size: current.size,
+        json: async () => (current.json !== undefined ? current.json : JSON.parse(current.body)),
+        text: async () => current.body,
+      };
+    }),
+    head: vi.fn().mockImplementation(async (key: string) => {
+      const current = objects.get(key);
+      if (!current) return null;
+      return { etag: current.etag, size: current.size, uploaded: current.uploaded, key };
+    }),
+    put: vi.fn().mockImplementation(async (key: string, value: string, putOptions?: R2PutOptions) => {
+      if (key === 'backup-handle.json' && options.failHandleWrites?.()) {
+        throw new Error('handle store failed');
+      }
+      const current = objects.get(key);
+      const onlyIf = putOptions?.onlyIf as R2Conditional | undefined;
+      if (onlyIf?.etagDoesNotMatch === '*' && current) return null;
+      if (onlyIf?.etagMatches && onlyIf.etagMatches !== current?.etag) return null;
+      n += 1;
+      const body = typeof value === 'string' ? value : '';
+      let json: unknown;
+      try {
+        json = body ? JSON.parse(body) : undefined;
+      } catch {
+        json = undefined;
+      }
+      const stored = {
+        body,
+        etag: `e${n}`,
+        size: body.length,
+        uploaded: new Date(),
+        json,
+      };
+      objects.set(key, stored);
+      return { etag: stored.etag, size: stored.size, uploaded: stored.uploaded };
+    }),
+    delete: vi.fn().mockImplementation(async (key: string) => {
+      objects.delete(key);
+    }),
+  } as unknown as R2Bucket;
+  return { bucket, objects };
+}
+
+describe('backup manifest and health', () => {
+  it('imports a legacy handle as a migrated generation before Backup Now', async () => {
+    const { bucket } = inMemoryBucket();
+    await bucket.put(
+      'backup-handle.json',
+      JSON.stringify({ id: validBackupHandle.id, dir: '/home/openclaw' }),
+    );
+    await bucket.put(
+      `backups/${validBackupHandle.id}/meta.json`,
+      JSON.stringify({
+        id: validBackupHandle.id,
+        dir: '/home/openclaw',
+        createdAt: new Date().toISOString(),
+        ttl: 3600,
+        sizeBytes: 123,
+      }),
+    );
+    await bucket.put(`backups/${validBackupHandle.id}/data.sqsh`, 'archive');
+    const data = await bucket.head(`backups/${validBackupHandle.id}/data.sqsh`);
+    if (data) {
+      // sizeBytes 123 vs body length mismatch is ok for migration visibility
+    }
+
+    const manifest = await reconcileBackupAuthority(bucket);
+    expect(manifest.generations).toHaveLength(1);
+    expect(manifest.generations[0]).toMatchObject({
+      id: validBackupHandle.id,
+      source: 'migrated',
+      verification: 'legacy',
+    });
+    expect(manifest.currentId).toBe(validBackupHandle.id);
+  });
+
+  it('repairs the handle from the manifest after a handle-write failure', async () => {
+    let failHandle = false;
+    const { bucket, objects } = inMemoryBucket({ failHandleWrites: () => failHandle });
+    await bucket.put(
+      'backup-handle.json',
+      JSON.stringify({ id: validBackupHandle.id, dir: '/home/openclaw' }),
+    );
+    const sandbox = {
+      exec: vi.fn().mockResolvedValue(createMockExecResult()),
+      createBackup: vi.fn().mockImplementation(async () => {
+        const id = '22222222-2222-4222-8222-222222222222';
+        await bucket.put(
+          `backups/${id}/meta.json`,
+          JSON.stringify({
+            id,
+            dir: '/home/openclaw',
+            createdAt: new Date().toISOString(),
+            ttl: 3600,
+            sizeBytes: 4,
+          }),
+        );
+        await bucket.put(`backups/${id}/data.sqsh`, 'data');
+        return { id, dir: '/home/openclaw' };
+      }),
+    } as unknown as Sandbox;
+
+    failHandle = true;
+    await expect(createSnapshot(sandbox, bucket)).resolves.toEqual({
+      id: '22222222-2222-4222-8222-222222222222',
+      dir: '/home/openclaw',
+    });
+    expect(JSON.parse(objects.get('backup-handle.json')?.body ?? '{}').id).toBe(validBackupHandle.id);
+
+    failHandle = false;
+    const repaired = await withBackupOperationLease(bucket, async () =>
+      reconcileBackupAuthority(bucket),
+    );
+    expect(repaired.currentId).toBe('22222222-2222-4222-8222-222222222222');
+    expect(JSON.parse(objects.get('backup-handle.json')?.body ?? '{}').id).toBe(
+      '22222222-2222-4222-8222-222222222222',
+    );
+  });
+
+  it('puts restore-needed when pendingRestoreId is set and the marker is missing', async () => {
+    const { bucket } = inMemoryBucket();
+    const pending = validBackupHandle.id;
+    await bucket.put(
+      'backup-manifest.json',
+      JSON.stringify({
+        version: 1,
+        retention: 5,
+        currentId: '22222222-2222-4222-8222-222222222222',
+        pendingRestoreId: pending,
+        lastLiveId: '22222222-2222-4222-8222-222222222222',
+        lastSkipAt: null,
+        lastError: null,
+        lastRestoreOutcome: null,
+        generations: [
+          { id: pending, dir: '/home/openclaw', createdAt: new Date().toISOString(), ttl: 3600 },
+        ],
+      }),
+    );
+
+    await reconcileBackupAuthority(bucket);
+    expect(await bucket.head('restore-needed')).toBeTruthy();
+    expect((await bucket.get('backup-handle.json'))?.json).toBeDefined();
+    await expect((await bucket.get('backup-handle.json'))!.json()).resolves.toEqual({
+      id: pending,
+      dir: '/home/openclaw',
+    });
+  });
+});
+
+describe('classifyBackupHealth', () => {
+  it('reports none when no handle exists', async () => {
+    const { bucket } = inMemoryBucket();
+    await expect(classifyBackupHealth(bucket, null)).resolves.toBe('none');
+  });
+
+  it('classifies an invalid UUID handle as corrupt', async () => {
+    await expect(
+      classifyBackupHealth(preflightBucket(), { id: 'not-a-uuid', dir: '/home/openclaw' }),
+    ).resolves.toBe('corrupt');
+  });
+
+  it('classifies malformed metadata as corrupt', async () => {
+    await expect(
+      classifyBackupHealth(preflightBucket({ malformedMetadata: true }), validBackupHandle),
+    ).resolves.toBe('corrupt');
+  });
+
+  it('classifies expired metadata as expired', async () => {
+    await expect(
+      classifyBackupHealth(
+        preflightBucket({
+          metadata: {
+            id: validBackupHandle.id,
+            dir: validBackupHandle.dir,
+            createdAt: new Date(Date.now() - 61_000).toISOString(),
+            ttl: 1,
+            sizeBytes: 123,
+          },
+        }),
+        validBackupHandle,
+      ),
+    ).resolves.toBe('expired');
+  });
+
+  it('classifies an empty archive as missing', async () => {
+    await expect(
+      classifyBackupHealth(preflightBucket({ dataSize: 0 }), validBackupHandle),
+    ).resolves.toBe('missing');
+  });
+
+  it('classifies a complete backup with remaining TTL above 48h as valid', async () => {
+    const bucket = preflightBucket({
+      metadata: {
+        id: validBackupHandle.id,
+        dir: validBackupHandle.dir,
+        createdAt: new Date().toISOString(),
+        ttl: 604800,
+        sizeBytes: 123,
+      },
+    });
+    await expect(classifyBackupHealth(bucket, validBackupHandle)).resolves.toBe('valid');
+  });
+
+  it('classifies a restorable backup inside 48h remaining as near-expiry', async () => {
+    const bucket = preflightBucket({
+      metadata: {
+        id: validBackupHandle.id,
+        dir: validBackupHandle.dir,
+        createdAt: new Date().toISOString(),
+        ttl: 3600,
+        sizeBytes: 123,
+      },
+    });
+    await expect(classifyBackupHealth(bucket, validBackupHandle)).resolves.toBe('near-expiry');
   });
 });

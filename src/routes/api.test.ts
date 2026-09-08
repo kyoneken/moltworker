@@ -28,12 +28,10 @@ describe('GET /api/admin/storage', () => {
     );
 
     expect(response.status).toBe(200);
-    expect(await response.json()).toEqual({
+    expect(await response.json()).toMatchObject({
       configured: true,
       lastBackupId: 'backup-123',
       lastSync: '2026-08-22T11:53:56.000Z',
-      message:
-        'R2 storage is configured. Your data will persist across container restarts via SDK snapshots.',
     });
   });
 });

@@ -113,11 +113,28 @@ export async function restartGateway(): Promise<RestartGatewayResponse> {
   });
 }
 
+export interface StorageGeneration {
+  id: string;
+  createdAt: string;
+  source: string;
+  verification: string;
+  sizeBytes: number;
+  health: string;
+  remainingTtlSeconds: number | null;
+  isCurrent: boolean;
+  isPendingRestore: boolean;
+}
+
 export interface StorageStatusResponse {
   configured: boolean;
   missing?: string[];
   lastBackupId: string | null;
   lastSync: string | null;
+  health?: string;
+  pendingRestoreId?: string | null;
+  lastRestoreOutcome?: { at: string; kind: string; backupId?: string } | null;
+  retention?: number;
+  generations?: StorageGeneration[];
   message: string;
 }
 
@@ -136,6 +153,22 @@ export async function triggerSync(): Promise<SyncResponse> {
   return apiRequest<SyncResponse>('/storage/sync', {
     method: 'POST',
   });
+}
+
+export async function validateBackupGeneration(
+  id: string,
+): Promise<{ id: string; health: string; preflight: boolean }> {
+  return apiRequest(`/storage/generations/${id}/validate`, { method: 'POST' });
+}
+
+export async function reserveBackupRestore(
+  id: string,
+): Promise<{ success: boolean; pendingRestoreId?: string; message?: string; error?: string }> {
+  return apiRequest(`/storage/generations/${id}/restore`, { method: 'POST' });
+}
+
+export async function cancelBackupRestore(): Promise<{ success: boolean; message?: string }> {
+  return apiRequest('/storage/restore/cancel', { method: 'POST' });
 }
 
 export interface AdminModelRecord {
