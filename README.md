@@ -262,11 +262,11 @@ R2 storage uses a backup/restore approach for simplicity:
 - The Worker creates a Sandbox SDK snapshot through `BACKUP_BUCKET`
 - You can trigger a manual backup from the admin UI at `/_admin/`
 
-**In the admin UI:**
-- Click "Backup Now" to create an immediate snapshot
-- History lists retained generations. History count is not the number of SDK-restorable copies; TTL is 7 days and expired snapshots are not restorable via the app path even if R2 objects remain
-- 事前検証 checks UUID/metadata/TTL/size/etag only. A restore drill is a separate isolated restore that checks paired devices, sessions, and a workspace file. See `docs/backup-restore-drill.md`
-- 復元予約 selects a generation; Recreate consumes it. That is not "restore complete" until cold restore succeeds
+**管理画面:**
+- 「今すぐバックアップ」で即時スナップショットを作成する
+- 履歴は保持している世代の一覧。件数は SDK で復元できる世代数ではない。TTL は 7 日で、期限切れは R2 上に残っていても通常の復元経路では使えない
+- 事前検証は UUID / metadata / TTL / size / etag のみ。復旧訓練は隔離復元後に paired devices、sessions、workspace ファイルを確認する。手順は `docs/backup-restore-drill.md`
+- 復元予約で世代を選び、コンテナ再作成がそれを適用する。cold restore が成功するまで「復元完了」ではない
 
 If the bucket or binding is absent, the container still runs but its data is ephemeral and can be lost on restart.
 

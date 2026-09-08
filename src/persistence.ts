@@ -966,7 +966,7 @@ export async function reserveRestore(bucket: R2Bucket, id: string): Promise<void
     const manifest = await reconcileBackupAuthority(bucket);
     const generation = manifest.generations.find((row) => row.id === id);
     if (!generation) {
-      throw new Error('Generation not found');
+      throw new Error('世代が見つかりません');
     }
     const health = await classifyBackupHealth(
       bucket,
@@ -974,7 +974,7 @@ export async function reserveRestore(bucket: R2Bucket, id: string): Promise<void
       generation.verification === 'stored-etag' ? generation.archiveEtag : null,
     );
     if (health !== 'valid' && health !== 'near-expiry') {
-      throw new Error('Generation is not restorable via the app path');
+      throw new Error('この世代は通常の復元経路では復元できません');
     }
     const next: BackupManifest = {
       ...manifest,

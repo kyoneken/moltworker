@@ -97,7 +97,7 @@ describe('POST /api/admin/gateway/restart', () => {
 
     expect(response.status).toBe(409);
     expect(await response.json()).toEqual({
-      error: 'No persisted backup is available. Create a backup before recreating the container.',
+      error: '復元可能なバックアップがありません。コンテナ再作成の前にバックアップを作成してください。',
     });
     expect(events).toEqual([
       'head:backup-operation-lock',
@@ -199,7 +199,7 @@ describe('POST /api/admin/gateway/restart', () => {
     expect(await response.json()).toEqual({
       success: true,
       message:
-        'Container recreation initiated. On next access, state will be restored from R2. All clients will be temporarily disconnected.',
+        'コンテナ再作成を開始しました。次回アクセス時に R2 から復元を試みます。接続中のクライアントは一時切断されます。',
     });
   });
 });
