@@ -367,7 +367,7 @@ export async function createUsageSnapshot(
       configured: false,
       source: 'unconfigured',
       message:
-        'AI Gateway usage is not configured. Set CLOUDFLARE_AI_GATEWAY_API_KEY, account/gateway IDs, and optional 24h/30d limits as Worker secrets. Tokens are never sent to the browser.',
+        'AI Gateway の利用量は未設定です。CLOUDFLARE_AI_GATEWAY_API_KEY、アカウント/ゲートウェイ ID、任意の 24時間/30日上限を Worker secret に設定してください。トークンはブラウザへ送りません。',
       windows: [
         buildWindow('24h', null, null, null, null, null),
         buildWindow('30d', null, null, null, null, null),
@@ -382,7 +382,7 @@ export async function createUsageSnapshot(
         configured: true,
         source: 'gateway',
         message:
-          'Usage figures are live Worker-side AI Gateway aggregates (GraphQL/REST). Request and response bodies are not stored for cost display.',
+          '利用量は Worker 側の AI Gateway 集計（GraphQL/REST）です。費用表示のためにリクエスト/レスポンス本文は保存しません。',
         windows: [
           buildWindow(
             '24h',
@@ -408,7 +408,7 @@ export async function createUsageSnapshot(
         return {
           configured: true,
           source: 'env-limits',
-          message: `Live AI Gateway usage fetch failed (${reason}). Showing configured env limits only; used values are env placeholders when set, not live gateway data.`,
+          message: `AI Gateway のライブ利用量の取得に失敗しました（${reason}）。設定済みの環境上限のみ表示します。使用量は設定したプレースホルダであり、ライブのゲートウェイ値ではありません。`,
           windows: [
             buildWindow('24h', envUsed24h, limit24h, envUsedTokens24h, token24h, null),
             buildWindow('30d', envUsed30d, limit30d, envUsedTokens30d, token30d, null),
@@ -419,7 +419,7 @@ export async function createUsageSnapshot(
       return {
         configured: true,
         source: 'unconfigured',
-        message: `Live AI Gateway usage fetch failed (${reason}). Configure spend/token limits or fix CLOUDFLARE_AI_GATEWAY_API_KEY permissions for Analytics/AI Gateway Read.`,
+        message: `AI Gateway のライブ利用量の取得に失敗しました（${reason}）。支出/トークン上限を設定するか、CLOUDFLARE_AI_GATEWAY_API_KEY の Analytics / AI Gateway Read 権限を確認してください。`,
         windows: [
           buildWindow('24h', null, null, null, null, null),
           buildWindow('30d', null, null, null, null, null),
@@ -432,7 +432,7 @@ export async function createUsageSnapshot(
     configured: true,
     source: 'env-limits',
     message:
-      'Usage figures use Worker env limit/used placeholders only (no live gateway credentials). Request and response bodies are not stored for cost display.',
+      '利用量は Worker 環境の上限/使用量プレースホルダのみです（ライブのゲートウェイ認証情報なし）。費用表示のためにリクエスト/レスポンス本文は保存しません。',
     windows: [
       buildWindow('24h', envUsed24h, limit24h, envUsedTokens24h, token24h, null),
       buildWindow('30d', envUsed30d, limit30d, envUsedTokens30d, token30d, null),

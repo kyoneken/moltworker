@@ -71,13 +71,13 @@ function sourceLabel(source: string): string {
 
 function formatTimeAgo(ts: number) {
   const seconds = Math.floor((Date.now() - ts) / 1000);
-  if (seconds < 60) return `${seconds}s ago`;
+  if (seconds < 60) return `${seconds}秒前`;
   const minutes = Math.floor(seconds / 60);
-  if (minutes < 60) return `${minutes}m ago`;
+  if (minutes < 60) return `${minutes}分前`;
   const hours = Math.floor(minutes / 60);
-  if (hours < 24) return `${hours}h ago`;
+  if (hours < 24) return `${hours}時間前`;
   const days = Math.floor(hours / 24);
-  return `${days}d ago`;
+  return `${days}日前`;
 }
 
 export default function AdminPage() {
@@ -100,13 +100,13 @@ export default function AdminPage() {
       if (data.error) {
         setError(data.error);
       } else if (data.parseError) {
-        setError(`Parse error: ${data.parseError}`);
+        setError(`解析エラー: ${data.parseError}`);
       }
     } catch (err) {
       if (err instanceof AuthError) {
-        setError('Authentication required. Please log in via Cloudflare Access.');
+        setError('認証が必要です。Cloudflare Access でログインしてください。');
       } else {
-        setError(err instanceof Error ? err.message : 'Failed to fetch devices');
+        setError(err instanceof Error ? err.message : 'デバイス一覧の取得に失敗しました');
       }
     } finally {
       setLoading(false);
@@ -134,10 +134,10 @@ export default function AdminPage() {
       if (result.success) {
         await fetchDevices();
       } else {
-        setError(result.error || 'Approval failed');
+        setError(result.error || '承認に失敗しました');
       }
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to approve device');
+      setError(err instanceof Error ? err.message : 'デバイスの承認に失敗しました');
     } finally {
       setActionInProgress(null);
     }
@@ -149,11 +149,11 @@ export default function AdminPage() {
     try {
       const result = await approveAllDevices();
       if (result.failed && result.failed.length > 0) {
-        setError(`Failed to approve ${result.failed.length} device(s)`);
+        setError(`${result.failed.length} 台の承認に失敗しました`);
       }
       await fetchDevices();
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to approve devices');
+      setError(err instanceof Error ? err.message : 'デバイスの一括承認に失敗しました');
     } finally {
       setActionInProgress(null);
     }
@@ -208,7 +208,7 @@ export default function AdminPage() {
         <div className="error-banner">
           <span>{error}</span>
           <button onClick={() => setError(null)} className="dismiss-btn">
-            Dismiss
+            閉じる
           </button>
         </div>
       )}
@@ -340,7 +340,7 @@ export default function AdminPage() {
 
       <section className="devices-section gateway-section">
         <div className="section-header">
-          <h2>Gateway Controls</h2>
+          <h2>ゲートウェイ操作</h2>
           <button
             className="btn btn-danger"
             onClick={handleRestartGateway}
@@ -359,13 +359,13 @@ export default function AdminPage() {
       {loading ? (
         <div className="loading">
           <div className="spinner"></div>
-          <p>Loading devices...</p>
+          <p>デバイスを読み込み中...</p>
         </div>
       ) : (
         <>
           <section className="devices-section">
             <div className="section-header">
-              <h2>Pending Pairing Requests</h2>
+              <h2>承認待ちのペアリング</h2>
               <div className="header-actions">
                 {pending.length > 0 && (
                   <button
@@ -375,20 +375,20 @@ export default function AdminPage() {
                   >
                     {actionInProgress === 'all' && <ButtonSpinner />}
                     {actionInProgress === 'all'
-                      ? 'Approving...'
-                      : `Approve All (${pending.length})`}
+                      ? '承認中...'
+                      : `すべて承認 (${pending.length})`}
                   </button>
                 )}
                 <button className="btn btn-secondary" onClick={fetchDevices} disabled={loading}>
-                  Refresh
+                  更新
                 </button>
               </div>
             </div>
             {pending.length === 0 ? (
               <div className="empty-state">
-                <p>No pending pairing requests</p>
+                <p>承認待ちのリクエストはありません</p>
                 <p className="hint">
-                  Devices will appear here when they attempt to connect without being paired.
+                  未ペアのデバイスが接続を試みると、ここに表示されます。
                 </p>
               </div>
             ) : (
@@ -397,32 +397,32 @@ export default function AdminPage() {
                   <div key={device.requestId} className="device-card pending">
                     <div className="device-header">
                       <span className="device-name">
-                        {device.displayName || device.deviceId || 'Unknown Device'}
+                        {device.displayName || device.deviceId || '不明なデバイス'}
                       </span>
-                      <span className="device-badge pending">Pending</span>
+                      <span className="device-badge pending">承認待ち</span>
                     </div>
                     <div className="device-details">
                       {device.platform && (
                         <div className="detail-row">
-                          <span className="label">Platform:</span>
+                          <span className="label">プラットフォーム:</span>
                           <span className="value">{device.platform}</span>
                         </div>
                       )}
                       {device.clientId && (
                         <div className="detail-row">
-                          <span className="label">Client:</span>
+                          <span className="label">クライアント:</span>
                           <span className="value">{device.clientId}</span>
                         </div>
                       )}
                       {device.clientMode && (
                         <div className="detail-row">
-                          <span className="label">Mode:</span>
+                          <span className="label">モード:</span>
                           <span className="value">{device.clientMode}</span>
                         </div>
                       )}
                       {device.role && (
                         <div className="detail-row">
-                          <span className="label">Role:</span>
+                          <span className="label">役割:</span>
                           <span className="value">{device.role}</span>
                         </div>
                       )}
@@ -433,7 +433,7 @@ export default function AdminPage() {
                         </div>
                       )}
                       <div className="detail-row">
-                        <span className="label">Requested:</span>
+                        <span className="label">要求日時:</span>
                         <span className="value" title={formatTimestamp(device.ts)}>
                           {formatTimeAgo(device.ts)}
                         </span>
@@ -446,7 +446,7 @@ export default function AdminPage() {
                         disabled={actionInProgress !== null}
                       >
                         {actionInProgress === device.requestId && <ButtonSpinner />}
-                        {actionInProgress === device.requestId ? 'Approving...' : 'Approve'}
+                        {actionInProgress === device.requestId ? '承認中...' : '承認'}
                       </button>
                     </div>
                   </div>
@@ -456,11 +456,11 @@ export default function AdminPage() {
           </section>
           <section className="devices-section">
             <div className="section-header">
-              <h2>Paired Devices</h2>
+              <h2>ペア済みデバイス</h2>
             </div>
             {paired.length === 0 ? (
               <div className="empty-state">
-                <p>No paired devices</p>
+                <p>ペア済みデバイスはありません</p>
               </div>
             ) : (
               <div className="devices-grid">
@@ -468,37 +468,37 @@ export default function AdminPage() {
                   <div key={device.deviceId} className="device-card paired">
                     <div className="device-header">
                       <span className="device-name">
-                        {device.displayName || device.deviceId || 'Unknown Device'}
+                        {device.displayName || device.deviceId || '不明なデバイス'}
                       </span>
-                      <span className="device-badge paired">Paired</span>
+                      <span className="device-badge paired">ペア済み</span>
                     </div>
                     <div className="device-details">
                       {device.platform && (
                         <div className="detail-row">
-                          <span className="label">Platform:</span>
+                          <span className="label">プラットフォーム:</span>
                           <span className="value">{device.platform}</span>
                         </div>
                       )}
                       {device.clientId && (
                         <div className="detail-row">
-                          <span className="label">Client:</span>
+                          <span className="label">クライアント:</span>
                           <span className="value">{device.clientId}</span>
                         </div>
                       )}
                       {device.clientMode && (
                         <div className="detail-row">
-                          <span className="label">Mode:</span>
+                          <span className="label">モード:</span>
                           <span className="value">{device.clientMode}</span>
                         </div>
                       )}
                       {device.role && (
                         <div className="detail-row">
-                          <span className="label">Role:</span>
+                          <span className="label">役割:</span>
                           <span className="value">{device.role}</span>
                         </div>
                       )}
                       <div className="detail-row">
-                        <span className="label">Paired:</span>
+                        <span className="label">ペア日時:</span>
                         <span className="value" title={formatTimestamp(device.approvedAtMs)}>
                           {formatTimeAgo(device.approvedAtMs)}
                         </span>
