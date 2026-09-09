@@ -68,5 +68,6 @@ export async function handleScheduled(env: OpenClawEnv): Promise<void> {
     await maybeCreateScheduledSnapshot(env);
   } catch (error) {
     console.warn('[CRON] Scheduled snapshot failed', error);
+    throw error;
   }
 }

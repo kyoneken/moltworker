@@ -376,12 +376,14 @@ async function commitManifestUpdate(
 ): Promise<boolean> {
   /* eslint-disable no-await-in-loop -- bounded manifest CAS retries */
   for (let attempt = 0; attempt < 3; attempt += 1) {
-    const stored = await getManifestWithEtag(bucket);
-    const written = await putManifest(
-      bucket,
-      update(stored?.manifest ?? emptyManifest()),
-      stored?.etag ?? null,
-    );
+    const read = await readManifest(bucket);
+    const current = read.status === 'ok' ? read.manifest : emptyManifest();
+    const etag = read.status === 'missing' ? null : read.etag;
+    const next = update(current);
+    if (read.status === 'ok' && JSON.stringify(next) === JSON.stringify(current)) {
+      return true;
+    }
+    const written = await putManifest(bucket, next, etag);
     if (written) return true;
   }
   /* eslint-enable no-await-in-loop */
@@ -685,8 +687,13 @@ export async function restoreIfNeeded(sandbox: Sandbox, bucket: R2Bucket): Promi
     // May not be mounted
   }
 
-  const storedHandle = await getStoredHandleWithEtag(bucket);
-  const manifestRead = await readManifest(bucket);
+  let storedHandle = await getStoredHandleWithEtag(bucket);
+  let manifestRead = await readManifest(bucket);
+  if (manifestRead.status === 'corrupt') {
+    await reconcileBackupAuthority(bucket);
+    storedHandle = await getStoredHandleWithEtag(bucket);
+    manifestRead = await readManifest(bucket);
+  }
   let handle = storedHandle?.handle ?? null;
   if (manifestRead.status === 'ok') {
     const targetId = authorityHandleId(manifestRead.manifest);
@@ -707,22 +714,34 @@ export async function restoreIfNeeded(sandbox: Sandbox, bucket: R2Bucket): Promi
   const t0 = Date.now();
   try {
     await sandbox.restoreBackup(handle);
-    const committed = await commitManifestUpdate(bucket, (current) => ({
-      ...current,
-      currentId: handle.id,
-      pendingRestoreId: null,
-      lastLiveId: handle.id,
-      lastRestoreOutcome: {
-        at: new Date().toISOString(),
-        kind: 'restored',
-        backupId: handle.id,
-      },
-    }));
+    const restoredId = handle.id;
+    let reservationMoved = false;
+    const committed = await commitManifestUpdate(bucket, (current) => {
+      const authority = current.pendingRestoreId ?? current.currentId;
+      if (authority && authority !== restoredId) {
+        reservationMoved = true;
+        return current;
+      }
+      reservationMoved = false;
+      return {
+        ...current,
+        currentId: restoredId,
+        pendingRestoreId: null,
+        lastLiveId: restoredId,
+        lastRestoreOutcome: {
+          at: new Date().toISOString(),
+          kind: 'restored',
+          backupId: restoredId,
+        },
+      };
+    });
     if (!committed) {
       restored = false;
       throw new Error('Backup manifest CAS failed while completing restore');
     }
-    await bucket.delete(RESTORE_NEEDED_KEY);
+    if (!reservationMoved) {
+      await bucket.delete(RESTORE_NEEDED_KEY);
+    }
     restored = true;
     console.log(`[persistence] Restore complete in ${Date.now() - t0}ms`);
   } catch (err: unknown) {
@@ -941,9 +960,13 @@ export interface BackupStatus {
 }
 
 export async function getBackupStatus(bucket: R2Bucket): Promise<BackupStatus> {
+  let read = await readManifest(bucket);
+  if (read.status === 'corrupt') {
+    await reconcileBackupAuthority(bucket);
+    read = await readManifest(bucket);
+  }
   const handle = await getStoredHandle(bucket);
-  const stored = await getManifestWithEtag(bucket);
-  const manifest = stored?.manifest ?? emptyManifest();
+  const manifest = read.status === 'ok' ? read.manifest : emptyManifest();
   const metadata = handle ? await bucket.head(HANDLE_KEY) : null;
   const now = Date.now();
 

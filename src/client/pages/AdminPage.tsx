@@ -225,7 +225,13 @@ export default function AdminPage() {
                 {storageStatus.health ?? 'unknown'}
               </span>
               {storageStatus.pendingRestoreId && (
-                <span className="last-sync">復元予約中: {storageStatus.pendingRestoreId}</span>
+                <span className="last-sync">Restore reserved: {storageStatus.pendingRestoreId}</span>
+              )}
+              {storageStatus.lastError && (
+                <span className="last-sync">
+                  Last backup error: {storageStatus.lastError.code} (
+                  {formatSyncTime(storageStatus.lastError.at)})
+                </span>
               )}
               {(storageStatus.lastRestoreOutcome?.kind === 'expired-continue' ||
                 storageStatus.lastRestoreOutcome?.kind === 'missing-continue') && (
@@ -250,7 +256,7 @@ export default function AdminPage() {
                 <div key={generation.id} className="backup-history-row">
                   <span>
                     {generation.id.slice(0, 8)} · {generation.health} · {generation.source}
-                    {generation.isPendingRestore ? ' · 復元予約' : ''}
+                    {generation.isPendingRestore ? ' · restore reserved' : ''}
                   </span>
                   <span>
                     <button
@@ -258,13 +264,13 @@ export default function AdminPage() {
                       onClick={async () => {
                         try {
                           const result = await validateBackupGeneration(generation.id);
-                          setError(`事前検証 ${result.id}: ${result.health}`);
+                          setError(`Preflight ${result.id}: ${result.health}`);
                         } catch (err) {
                           setError(err instanceof Error ? err.message : 'Validate failed');
                         }
                       }}
                     >
-                      事前検証
+                      Preflight
                     </button>{' '}
                     <button
                       className="btn btn-secondary btn-sm"
@@ -280,7 +286,7 @@ export default function AdminPage() {
                         }
                       }}
                     >
-                      復元予約
+                      Reserve restore
                     </button>
                   </span>
                 </div>

@@ -161,6 +161,52 @@ describe('POST /api/admin/gateway/restart', () => {
     ).toHaveLength(0);
   });
 
+  it('returns 409 when the stored archive etag does not match the manifest', async () => {
+    const events: string[] = [];
+    const bucket = validBackupBucket(events);
+    vi.mocked(bucket.get).mockImplementation(async (key: string) => {
+      events.push(`get:${key}`);
+      if (key === 'backup-handle.json') return { json: vi.fn().mockResolvedValue(handle) };
+      if (key === 'backup-manifest.json') {
+        return {
+          json: vi.fn().mockResolvedValue({
+            version: 1,
+            retention: 5,
+            currentId: handle.id,
+            pendingRestoreId: null,
+            lastLiveId: handle.id,
+            lastSkipAt: null,
+            lastError: null,
+            lastRestoreOutcome: null,
+            generations: [
+              {
+                id: handle.id,
+                dir: handle.dir,
+                createdAt: metadata.createdAt,
+                ttl: metadata.ttl,
+                sizeBytes: metadata.sizeBytes,
+                archiveEtag: 'expected-archive-etag',
+                source: 'manual',
+                verification: 'stored-etag',
+              },
+            ],
+          }),
+          etag: 'manifest-etag',
+        };
+      }
+      if (key === `backups/${handle.id}/meta.json`)
+        return { json: vi.fn().mockResolvedValue(metadata) };
+      return null;
+    });
+    const sandbox = { destroy: vi.fn() } as unknown as Sandbox;
+
+    const response = await restartRequest(sandbox, bucket);
+
+    expect(response.status).toBe(409);
+    expect(events).not.toContain('put:restore-needed');
+    expect(vi.mocked(sandbox.destroy)).not.toHaveBeenCalled();
+  });
+
   it('describes container recreation, R2 restoration, and temporary client disconnects on success', async () => {
     const events: string[] = [];
     const bucket = validBackupBucket(events);

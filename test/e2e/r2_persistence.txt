@@ -83,10 +83,11 @@ where
 * result.generations.length >= 3
 
 ===
-recreate refuses a non-restorable handle
+recreate refuses a non-restorable archive
 ===
 WORKER_URL=$(cat "$CCTR_FIXTURE_DIR/worker-url.txt")
-./curl-auth -s -X POST "$WORKER_URL/debug/r2-put?key=backup-handle.json" -d '{"id":"not-a-uuid","dir":"/home/openclaw"}' >/dev/null
+BACKUP_ID=$(./curl-auth -s "$WORKER_URL/api/admin/storage" | jq -r '.lastBackupId')
+./curl-auth -s -X POST "$WORKER_URL/debug/r2-put?key=backups/${BACKUP_ID}/data.sqsh" -d 'x' >/dev/null
 ./curl-auth -s -X POST "$WORKER_URL/api/admin/gateway/restart" | jq .
 ---
 {{ result: json object }}

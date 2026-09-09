@@ -115,7 +115,9 @@ describe('handleScheduled', () => {
     recordBackupError.mockResolvedValue(undefined);
     const bucket = { get: vi.fn().mockResolvedValue(null) } as unknown as R2Bucket;
 
-    await handleScheduled(createMockEnv({ BACKUP_BUCKET: bucket }));
+    await expect(handleScheduled(createMockEnv({ BACKUP_BUCKET: bucket }))).rejects.toThrow(
+      'snapshot failed',
+    );
 
     expect(recordBackupError).toHaveBeenCalledWith(bucket, 'scheduled-snapshot-failed');
   });

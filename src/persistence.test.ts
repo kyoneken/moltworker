@@ -572,9 +572,10 @@ describe('restoreIfNeeded', () => {
     async ({ error }) => {
       clearPersistenceCache();
       const bucket = {
-        get: vi
-          .fn()
-          .mockResolvedValue({ etag: 'old-etag', json: vi.fn().mockResolvedValue(oldHandle) }),
+        get: vi.fn().mockImplementation(async (key: string) => {
+          if (key !== 'backup-handle.json') return null;
+          return { etag: 'old-etag', json: vi.fn().mockResolvedValue(oldHandle) };
+        }),
         put: vi.fn().mockResolvedValue({ etag: 'tombstone-etag' }),
         delete: vi.fn().mockResolvedValue(undefined),
         head: vi.fn().mockResolvedValue(null),
@@ -601,11 +602,13 @@ describe('restoreIfNeeded', () => {
   it('preserves the backup handle and restore marker for unrelated restore failures', async () => {
     clearPersistenceCache();
     const bucket = {
-      get: vi
-        .fn()
-        .mockResolvedValue({ etag: 'old-etag', json: vi.fn().mockResolvedValue(oldHandle) }),
+      get: vi.fn().mockImplementation(async (key: string) => {
+        if (key !== 'backup-handle.json') return null;
+        return { etag: 'old-etag', json: vi.fn().mockResolvedValue(oldHandle) };
+      }),
       put: vi.fn(),
       delete: vi.fn(),
+      head: vi.fn().mockResolvedValue(null),
     } as unknown as R2Bucket;
     const failure = new Error('restore transport unavailable');
     const sandbox = {
@@ -993,5 +996,161 @@ describe('restore reservation and manifest authority', () => {
     const { bucket } = inMemoryBucket();
     await expect(setBackupRetention(bucket, 100)).rejects.toThrow('integer from 3 to 20');
     await expect(setBackupRetention(bucket, 5.5)).rejects.toThrow('integer from 3 to 20');
+  });
+
+  it('self-heals a corrupt manifest on getBackupStatus without an explicit reconcile', async () => {
+    const { bucket } = inMemoryBucket();
+    await seedRestorable(bucket, pending);
+    await bucket.put('backup-handle.json', JSON.stringify(pending));
+    await bucket.put('backup-manifest.json', JSON.stringify({ version: 2 }));
+
+    const status = await getBackupStatus(bucket);
+
+    expect(status.lastError?.code).toBe('corrupt-manifest');
+    expect(status.generations.some((row) => row.id === pending.id)).toBe(true);
+    const repaired = JSON.parse(
+      (await (await bucket.get('backup-manifest.json'))!.text()) as string,
+    );
+    expect(repaired.generations[0]?.id).toBe(pending.id);
+  });
+
+  it('self-heals a corrupt manifest on restoreIfNeeded without an explicit reconcile', async () => {
+    clearPersistenceCache();
+    const { bucket } = inMemoryBucket();
+    await seedRestorable(bucket, pending);
+    await bucket.put('backup-handle.json', JSON.stringify(pending));
+    await bucket.put('backup-manifest.json', JSON.stringify({ version: 2 }));
+    const sandbox = {
+      exec: vi.fn().mockResolvedValue(createMockExecResult()),
+      restoreBackup: vi.fn().mockResolvedValue(undefined),
+    } as unknown as Sandbox;
+
+    await restoreIfNeeded(sandbox, bucket);
+
+    expect(vi.mocked(sandbox.restoreBackup)).toHaveBeenCalledWith(pending);
+    const status = await getBackupStatus(bucket);
+    expect(status.lastRestoreOutcome?.kind).toBe('restored');
+    expect(status.generations.some((row) => row.id === pending.id)).toBe(true);
+  });
+
+  it('does not clear a newer restore reservation when completing an in-flight restore', async () => {
+    clearPersistenceCache();
+    const { bucket, objects } = inMemoryBucket();
+    await seedRestorable(bucket, pending);
+    await seedRestorable(bucket, live);
+    await bucket.put('backup-handle.json', JSON.stringify(pending));
+    await bucket.put(
+      'backup-manifest.json',
+      JSON.stringify({
+        version: 1,
+        retention: 5,
+        currentId: pending.id,
+        pendingRestoreId: pending.id,
+        lastLiveId: live.id,
+        lastSkipAt: null,
+        lastError: null,
+        lastRestoreOutcome: null,
+        generations: [
+          {
+            id: pending.id,
+            dir: pending.dir,
+            createdAt: new Date().toISOString(),
+            ttl: 604800,
+            sizeBytes: 4,
+            archiveEtag: objects.get(`backups/${pending.id}/data.sqsh`)?.etag ?? null,
+            source: 'manual',
+            verification: 'stored-etag',
+          },
+          {
+            id: live.id,
+            dir: live.dir,
+            createdAt: new Date().toISOString(),
+            ttl: 604800,
+            sizeBytes: 4,
+            archiveEtag: objects.get(`backups/${live.id}/data.sqsh`)?.etag ?? null,
+            source: 'manual',
+            verification: 'stored-etag',
+          },
+        ],
+      }),
+    );
+    await bucket.put('restore-needed', '1');
+
+    let releaseRestore: (() => void) | undefined;
+    const restoreStarted = new Promise<void>((resolve) => {
+      /* started when restoreBackup is entered */
+      void resolve;
+    });
+    let signalStarted: (() => void) | undefined;
+    const started = new Promise<void>((resolve) => {
+      signalStarted = resolve;
+    });
+    const sandbox = {
+      exec: vi.fn().mockResolvedValue(createMockExecResult()),
+      restoreBackup: vi.fn().mockImplementation(async () => {
+        signalStarted?.();
+        await new Promise<void>((wait) => {
+          releaseRestore = wait;
+        });
+      }),
+    } as unknown as Sandbox;
+    void restoreStarted;
+
+    const restoring = restoreIfNeeded(sandbox, bucket);
+    await started;
+    await reserveRestore(bucket, live.id);
+    releaseRestore?.();
+    await restoring;
+
+    expect(JSON.parse(objects.get('backup-manifest.json')?.body ?? '{}').pendingRestoreId).toBe(
+      live.id,
+    );
+    expect(JSON.parse(objects.get('backup-handle.json')?.body ?? '{}').id).toBe(live.id);
+    expect(await bucket.head('restore-needed')).toBeTruthy();
+  });
+
+  it('does not delete pruned archives when the kept manifest CAS fails', async () => {
+    let failManifest = false;
+    const { bucket, objects } = inMemoryBucket({ failManifestWrites: () => failManifest });
+    const ids = [
+      '11111111-1111-4111-8111-111111111111',
+      '22222222-2222-4222-8222-222222222222',
+      '33333333-3333-4333-8333-333333333333',
+      '44444444-4444-4444-8444-444444444444',
+    ];
+    const generations = [];
+    for (const [index, id] of ids.entries()) {
+      const generation = { id, dir: '/home/openclaw' };
+      await seedRestorable(bucket, generation);
+      generations.push({
+        id,
+        dir: '/home/openclaw',
+        createdAt: new Date(Date.now() - index * 1000).toISOString(),
+        ttl: 604800,
+        sizeBytes: 4,
+        archiveEtag: objects.get(`backups/${id}/data.sqsh`)?.etag ?? null,
+        source: 'manual',
+        verification: 'stored-etag',
+      });
+    }
+    await bucket.put('backup-handle.json', JSON.stringify({ id: ids[0], dir: '/home/openclaw' }));
+    await bucket.put(
+      'backup-manifest.json',
+      JSON.stringify({
+        version: 1,
+        retention: 5,
+        currentId: ids[0],
+        pendingRestoreId: null,
+        lastLiveId: ids[0],
+        lastSkipAt: null,
+        lastError: null,
+        lastRestoreOutcome: null,
+        generations,
+      }),
+    );
+    failManifest = true;
+    await expect(setBackupRetention(bucket, 3)).rejects.toThrow('Backup manifest CAS failed');
+    expect(objects.has(`backups/${ids[3]}/data.sqsh`)).toBe(true);
+    expect(objects.has(`backups/${ids[3]}/meta.json`)).toBe(true);
   });
 });

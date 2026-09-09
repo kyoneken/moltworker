@@ -133,6 +133,7 @@ export interface StorageStatusResponse {
   health?: string;
   pendingRestoreId?: string | null;
   lastRestoreOutcome?: { at: string; kind: string; backupId?: string } | null;
+  lastError?: { at: string; code: string } | null;
   retention?: number;
   generations?: StorageGeneration[];
   message: string;

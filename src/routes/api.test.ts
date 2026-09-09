@@ -5,8 +5,13 @@ import { api } from './api';
 describe('GET /api/admin/storage', () => {
   it('reports the stored backup ID and the backup-handle upload time', async () => {
     const backupBucket = {
-      get: vi.fn().mockResolvedValue({
-        json: vi.fn().mockResolvedValue({ id: 'backup-123', dir: '/home/openclaw' }),
+      get: vi.fn().mockImplementation(async (key: string) => {
+        if (key === 'backup-handle.json') {
+          return {
+            json: vi.fn().mockResolvedValue({ id: 'backup-123', dir: '/home/openclaw' }),
+          };
+        }
+        return null;
       }),
       head: vi.fn().mockResolvedValue({
         key: 'backup-handle.json',
