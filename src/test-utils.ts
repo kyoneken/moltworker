@@ -36,6 +36,32 @@ export function createMockProcess(
   };
 }
 
+export function createMockR2ObjectBody(
+  jsonValue: unknown,
+  options: { etag?: string; key?: string } = {},
+): R2ObjectBody {
+  const etag = options.etag ?? 'etag';
+  const body = JSON.stringify(jsonValue);
+  return {
+    key: options.key ?? '',
+    version: '1',
+    size: body.length,
+    etag,
+    httpEtag: `"${etag}"`,
+    checksums: {},
+    uploaded: new Date(0),
+    storageClass: 'Standard',
+    writeHttpMetadata() {},
+    body: new ReadableStream(),
+    bodyUsed: false,
+    arrayBuffer: async () => new TextEncoder().encode(body).buffer as ArrayBuffer,
+    bytes: async () => new TextEncoder().encode(body),
+    text: async () => body,
+    json: async () => jsonValue,
+    blob: async () => new Blob([body]),
+  } as unknown as R2ObjectBody;
+}
+
 export function createMockExecResult(
   stdout: string = '',
   options: { exitCode?: number; stderr?: string; success?: boolean } = {},

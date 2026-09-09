@@ -4,10 +4,16 @@ import { createAccessMiddleware } from '../auth';
 import { prepareGateway, waitForProcess } from '../gateway';
 import {
   BackupOperationLeaseTimeoutError,
+  cancelRestoreReservation,
   createSnapshotUnderLease,
   getBackupStatus,
   hasUsableBackup,
+  isValidRetention,
+  reconcileBackupAuthority,
+  reserveRestore,
+  setBackupRetention,
   signalRestoreNeeded,
+  validateGeneration,
   withBackupOperationLease,
 } from '../persistence';
 import {
@@ -205,11 +211,17 @@ adminApi.post('/devices/approve-all', async (c) => {
 adminApi.get('/storage', async (c) => {
   const status = await getBackupStatus(c.env.BACKUP_BUCKET);
 
+  const restorable = status.health === 'valid' || status.health === 'near-expiry';
+  const expiredContinue = status.lastRestoreOutcome?.kind === 'expired-continue'
+    || status.lastRestoreOutcome?.kind === 'missing-continue';
   return c.json({
     configured: true,
     ...status,
-    message:
-      'R2 storage is configured. Your data will persist across container restarts via SDK snapshots.',
+    message: expiredContinue
+      ? 'The last cold start did not restore prior data. A later snapshot of the empty tree is not a restore.'
+      : restorable
+        ? 'R2 storage is configured. Restorable snapshot health is shown separately from backup history.'
+        : 'R2 storage is configured, but the current snapshot is not restorable via the app path.',
   });
 });
 
@@ -238,8 +250,9 @@ adminApi.post('/storage/sync', async (c) => {
       const handle = await createSnapshotUnderLease(sandbox, c.env.BACKUP_BUCKET, lease);
       return c.json({
         success: true,
-        message: 'Snapshot created successfully',
+        message: handle.skipped ? 'Snapshot skipped; fingerprint unchanged' : 'Snapshot created successfully',
         backupId: handle.id,
+        skipped: handle.skipped === true,
         debug: { mountState, dirContents },
       });
     });
@@ -280,12 +293,52 @@ adminApi.post('/web/diagnostics', async (c) => {
   }
 });
 
+adminApi.post('/storage/generations/:id/validate', async (c) => {
+  const id = c.req.param('id');
+  const result = await validateGeneration(c.env.BACKUP_BUCKET, id);
+  return c.json({ ...result, preflight: true });
+});
+
+adminApi.post('/storage/generations/:id/restore', async (c) => {
+  const id = c.req.param('id');
+  try {
+    await reserveRestore(c.env.BACKUP_BUCKET, id);
+    return c.json({
+      success: true,
+      pendingRestoreId: id,
+      message: 'Restore reserved. Recreate the container to apply it. This is not a completed restore.',
+    });
+  } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+    const status = errorMessage.includes('not restorable') || errorMessage.includes('not found')
+      ? 409
+      : 500;
+    return c.json({ success: false, error: errorMessage }, status);
+  }
+});
+
+adminApi.post('/storage/restore/cancel', async (c) => {
+  await cancelRestoreReservation(c.env.BACKUP_BUCKET);
+  return c.json({ success: true, message: 'Restore reservation cancelled' });
+});
+
+adminApi.put('/storage/retention', async (c) => {
+  const body = await c.req.json<{ retention?: number }>();
+  if (!isValidRetention(body.retention)) {
+    return c.json({ error: 'retention must be an integer from 3 to 20' }, 400);
+  }
+  const retention = await setBackupRetention(c.env.BACKUP_BUCKET, body.retention);
+  return c.json({ success: true, retention });
+});
+
 // POST /api/admin/gateway/restart - Recreate the sandbox after verifying R2 backup data
 adminApi.post('/gateway/restart', async (c) => {
   const sandbox = c.get('sandbox');
 
   try {
     return await withBackupOperationLease(c.env.BACKUP_BUCKET, async (lease) => {
+      await reconcileBackupAuthority(c.env.BACKUP_BUCKET);
+      await lease.renew();
       const backupAvailable = await hasUsableBackup(c.env.BACKUP_BUCKET);
       if (!backupAvailable) {
         return c.json(

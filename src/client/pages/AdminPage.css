@@ -78,6 +78,21 @@
   opacity: 0.9;
 }
 
+.backup-history {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  margin-top: 1rem;
+}
+
+.backup-history-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 0.75rem;
+  font-size: 0.875rem;
+}
+
 .warning-banner .missing-secrets {
   margin-top: 0.5rem;
   font-family: monospace;

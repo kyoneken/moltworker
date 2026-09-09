@@ -6,6 +6,10 @@ import {
   restartGateway,
   getStorageStatus,
   triggerSync,
+  validateBackupGeneration,
+  reserveBackupRestore,
+  cancelBackupRestore,
+  setBackupRetention,
   AuthError,
   type PendingDevice,
   type PairedDevice,
@@ -202,15 +206,40 @@ export default function AdminPage() {
       )}
 
       {storageStatus?.configured && (
-        <div className="success-banner">
+        <div
+          className={
+            storageStatus.lastRestoreOutcome?.kind === 'expired-continue' ||
+            storageStatus.lastRestoreOutcome?.kind === 'missing-continue' ||
+            storageStatus.health === 'expired' ||
+            storageStatus.health === 'missing' ||
+            storageStatus.health === 'corrupt'
+              ? 'warning-banner'
+              : 'success-banner'
+          }
+        >
           <div className="storage-status">
             <div className="storage-info">
-              <span>
-                R2 storage is configured. Your data will persist across container restarts.
-              </span>
+              <span>{storageStatus.message}</span>
               <span className="last-sync">
-                Last backup: {formatSyncTime(storageStatus.lastSync)}
+                Last backup: {formatSyncTime(storageStatus.lastSync)} · health:{' '}
+                {storageStatus.health ?? 'unknown'}
               </span>
+              {storageStatus.pendingRestoreId && (
+                <span className="last-sync">Restore reserved: {storageStatus.pendingRestoreId}</span>
+              )}
+              {storageStatus.lastError && (
+                <span className="last-sync">
+                  Last backup error: {storageStatus.lastError.code} (
+                  {formatSyncTime(storageStatus.lastError.at)})
+                </span>
+              )}
+              {(storageStatus.lastRestoreOutcome?.kind === 'expired-continue' ||
+                storageStatus.lastRestoreOutcome?.kind === 'missing-continue') && (
+                <span className="last-sync">
+                  Cold start did not restore prior data. A newer snapshot of the empty tree is not a
+                  restore.
+                </span>
+              )}
             </div>
             <button
               className="btn btn-secondary btn-sm"
@@ -221,6 +250,90 @@ export default function AdminPage() {
               {syncInProgress ? 'Syncing...' : 'Backup Now'}
             </button>
           </div>
+          {storageStatus.generations && storageStatus.generations.length > 0 && (
+            <div className="backup-history">
+              {storageStatus.generations.map((generation) => (
+                <div key={generation.id} className="backup-history-row">
+                  <span>
+                    {generation.id.slice(0, 8)} · {generation.health} · {generation.source}
+                    {generation.isPendingRestore ? ' · restore reserved' : ''}
+                  </span>
+                  <span>
+                    <button
+                      className="btn btn-secondary btn-sm"
+                      onClick={async () => {
+                        try {
+                          const result = await validateBackupGeneration(generation.id);
+                          setError(`Preflight ${result.id}: ${result.health}`);
+                        } catch (err) {
+                          setError(err instanceof Error ? err.message : 'Validate failed');
+                        }
+                      }}
+                    >
+                      Preflight
+                    </button>{' '}
+                    <button
+                      className="btn btn-secondary btn-sm"
+                      onClick={async () => {
+                        if (!confirm('Reserve restore of this generation? Recreate is still required.')) {
+                          return;
+                        }
+                        try {
+                          await reserveBackupRestore(generation.id);
+                          await fetchStorageStatus();
+                        } catch (err) {
+                          setError(err instanceof Error ? err.message : 'Restore reserve failed');
+                        }
+                      }}
+                    >
+                      Reserve restore
+                    </button>
+                  </span>
+                </div>
+              ))}
+              <div className="backup-history-row">
+                <span>Keep generations: {storageStatus.retention ?? 5}</span>
+                <form
+                  onSubmit={async (event) => {
+                    event.preventDefault();
+                    const form = event.currentTarget;
+                    const value = Number(new FormData(form).get('retention'));
+                    try {
+                      await setBackupRetention(value);
+                      await fetchStorageStatus();
+                    } catch (err) {
+                      setError(err instanceof Error ? err.message : 'Retention update failed');
+                    }
+                  }}
+                >
+                  <input
+                    name="retention"
+                    type="number"
+                    min={3}
+                    max={20}
+                    step={1}
+                    defaultValue={storageStatus.retention ?? 5}
+                    className="btn btn-secondary btn-sm"
+                    style={{ width: '4.5rem' }}
+                  />
+                  <button className="btn btn-secondary btn-sm" type="submit">
+                    Save retention
+                  </button>
+                </form>
+              </div>
+              {storageStatus.pendingRestoreId && (
+                <button
+                  className="btn btn-secondary btn-sm"
+                  onClick={async () => {
+                    await cancelBackupRestore();
+                    await fetchStorageStatus();
+                  }}
+                >
+                  Cancel restore reservation
+                </button>
+              )}
+            </div>
+          )}
         </div>
       )}
 
@@ -239,9 +352,9 @@ export default function AdminPage() {
           </button>
         </div>
         <p className="hint">
-          Recreate the container to apply configuration changes or recover from errors. On the next
-          access, state will be restored from R2 and all connected clients will be temporarily
-          disconnected.
+          Recreate the container to apply configuration changes or consume a restore reservation. This
+          is not proof that prior data was restored; check snapshot health first. Expired SDK backups
+          are not restorable via the app path even if R2 objects remain.
         </p>
       </section>
 
