@@ -857,23 +857,27 @@ describe('classifyBackupHealth', () => {
   });
 });
 
+async function seedRestorable(
+  bucket: R2Bucket,
+  generation: { id: string; dir: string },
+  size = 4,
+): Promise<void> {
+  await bucket.put(
+    `backups/${generation.id}/meta.json`,
+    JSON.stringify({
+      id: generation.id,
+      dir: generation.dir,
+      createdAt: new Date().toISOString(),
+      ttl: 604800,
+      sizeBytes: size,
+    }),
+  );
+  await bucket.put(`backups/${generation.id}/data.sqsh`, 'data');
+}
+
 describe('restore reservation and manifest authority', () => {
   const pending = validBackupHandle;
   const live = { id: '22222222-2222-4222-8222-222222222222', dir: '/home/openclaw' };
-
-  async function seedRestorable(bucket: R2Bucket, generation: { id: string; dir: string }, size = 4) {
-    await bucket.put(
-      `backups/${generation.id}/meta.json`,
-      JSON.stringify({
-        id: generation.id,
-        dir: generation.dir,
-        createdAt: new Date().toISOString(),
-        ttl: 604800,
-        sizeBytes: size,
-      }),
-    );
-    await bucket.put(`backups/${generation.id}/data.sqsh`, 'data');
-  }
 
   it('restores the pending generation instead of a lagging handle', async () => {
     clearPersistenceCache();
@@ -1118,21 +1122,17 @@ describe('restore reservation and manifest authority', () => {
       '33333333-3333-4333-8333-333333333333',
       '44444444-4444-4444-8444-444444444444',
     ];
-    const generations = [];
-    for (const [index, id] of ids.entries()) {
-      const generation = { id, dir: '/home/openclaw' };
-      await seedRestorable(bucket, generation);
-      generations.push({
-        id,
-        dir: '/home/openclaw',
-        createdAt: new Date(Date.now() - index * 1000).toISOString(),
-        ttl: 604800,
-        sizeBytes: 4,
-        archiveEtag: objects.get(`backups/${id}/data.sqsh`)?.etag ?? null,
-        source: 'manual',
-        verification: 'stored-etag',
-      });
-    }
+    await Promise.all(ids.map((id) => seedRestorable(bucket, { id, dir: '/home/openclaw' })));
+    const generations = ids.map((id, index) => ({
+      id,
+      dir: '/home/openclaw',
+      createdAt: new Date(Date.now() - index * 1000).toISOString(),
+      ttl: 604800,
+      sizeBytes: 4,
+      archiveEtag: objects.get(`backups/${id}/data.sqsh`)?.etag ?? null,
+      source: 'manual' as const,
+      verification: 'stored-etag' as const,
+    }));
     await bucket.put('backup-handle.json', JSON.stringify({ id: ids[0], dir: '/home/openclaw' }));
     await bucket.put(
       'backup-manifest.json',

@@ -3,7 +3,7 @@ import { Hono } from 'hono';
 import type { Sandbox } from '@cloudflare/sandbox';
 import type { AppEnv } from '../types';
 import { clearPersistenceCache } from '../persistence';
-import { createMockEnv } from '../test-utils';
+import { createMockEnv, createMockR2ObjectBody } from '../test-utils';
 
 const { findExistingGatewayProcess, killGateway, prepareGateway, waitForProcess } = vi.hoisted(
   () => ({
@@ -166,10 +166,12 @@ describe('POST /api/admin/gateway/restart', () => {
     const bucket = validBackupBucket(events);
     vi.mocked(bucket.get).mockImplementation(async (key: string) => {
       events.push(`get:${key}`);
-      if (key === 'backup-handle.json') return { json: vi.fn().mockResolvedValue(handle) };
+      if (key === 'backup-handle.json') {
+        return createMockR2ObjectBody(handle, { key, etag: 'handle-etag' });
+      }
       if (key === 'backup-manifest.json') {
-        return {
-          json: vi.fn().mockResolvedValue({
+        return createMockR2ObjectBody(
+          {
             version: 1,
             retention: 5,
             currentId: handle.id,
@@ -190,12 +192,13 @@ describe('POST /api/admin/gateway/restart', () => {
                 verification: 'stored-etag',
               },
             ],
-          }),
-          etag: 'manifest-etag',
-        };
+          },
+          { key, etag: 'manifest-etag' },
+        );
       }
-      if (key === `backups/${handle.id}/meta.json`)
-        return { json: vi.fn().mockResolvedValue(metadata) };
+      if (key === `backups/${handle.id}/meta.json`) {
+        return createMockR2ObjectBody(metadata, { key, etag: 'meta-etag' });
+      }
       return null;
     });
     const sandbox = { destroy: vi.fn() } as unknown as Sandbox;
