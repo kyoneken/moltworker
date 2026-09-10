@@ -142,6 +142,7 @@ stdout.toLowerCase().includes('approved')
 
 ```bash
 npm test              # Run tests (vitest)
+npm run test:harness   # Test the multi-agent harness with synthetic fixtures
 npm run test:watch    # Run tests in watch mode
 npm run build         # Build worker + client
 npm run deploy        # Build and deploy to Cloudflare
@@ -149,6 +150,28 @@ npm run dev           # Vite dev server
 npm run start         # wrangler dev (local worker)
 npm run typecheck     # TypeScript check
 ```
+
+### Multi-agent harness
+
+The project-scoped harness is installed from the fixed source revision recorded
+in `harness/source-lock.json`. It is intentionally run against one agent target
+at a time so an existing target configuration can be reviewed before changes
+are applied:
+
+```bash
+node scripts/harness.mjs bootstrap --target codex --source /path/to/coding-agent-harness
+node scripts/harness.mjs verify --target codex --source .harness/source/coding-agent-harness
+node scripts/harness.mjs doctor --target codex
+node scripts/harness.mjs restore --target codex
+```
+
+The source directory is private and source-derived output is ignored by Git.
+Bootstrap verifies every locked file before staging it. The harness owns only
+the generated deltas it records under `.harness/state/`; a manual edit causes a
+restore conflict instead of silently deleting user data. Use the
+`harness-setup` skill for 1Password MCP and Cloudflare MCP onboarding, and
+`harness-doctor` for GitHub MCP diagnostics. Never place credentials in tracked
+files or MCP arguments.
 
 ## Testing
 

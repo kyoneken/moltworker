@@ -1,0 +1,40 @@
+{
+  "schemaVersion": 1,
+  "repository": "kyoneken/coding-agent-harness",
+  "ref": "f26054f6256e10a107d800d2023defa94f2f71a7",
+  "apmVersion": "0.29.0",
+  "files": [
+    {
+      "path": ".apm/hooks/scripts/secret-command-guard.sh",
+      "sha256": "aba0159d6325638552e5c95898d584ba3a12b3f7ac5f10af197a3a07883744ce"
+    },
+    {
+      "path": ".apm/hooks/secret-command-guard.json",
+      "sha256": "a815246de55414767a973a6e390edc41453acfb08fb701dc1130d2f47be28e40"
+    },
+    {
+      "path": ".apm/instructions/secret-safety.instructions.md",
+      "sha256": "08585fbfc982a79d60a54358aa24e08111e00d8d4e86b4bb50b139f9020c3b6e"
+    },
+    {
+      "path": ".apm/skills/onepassword-environments/SKILL.md",
+      "sha256": "7b81e48866a359aa6eb937974b69a4007d2c6bd657d89ad77f86ac4a51d4021e"
+    },
+    {
+      "path": ".apm/skills/subagent-driven-implementation/SKILL.md",
+      "sha256": "576968a2247304d08240acde898dfb0bb1418e839e6408be99e162c7eff03692"
+    },
+    {
+      "path": "apm.yml",
+      "sha256": "ced80e372f7cae9740ab5eaa136bd7c77f0bf29a90c72732d3a9523e8a4241d3"
+    },
+    {
+      "path": "packages/1password-mcp/apm.lock.yaml",
+      "sha256": "6ae9cdb7da6bbf0739cbf03621b9049b51ad950cdd1df9d523cf8cabe12ddb4f"
+    },
+    {
+      "path": "packages/1password-mcp/apm.yml",
+      "sha256": "00f00c87a428e0549a35d72212ba208b7f7502ec2201de2c3e16210a8e01667f"
+    }
+  ]
+}

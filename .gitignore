@@ -65,3 +65,13 @@ test/e2e/.dev.vars
 # Agent worktrees and execution ledgers
 .worktrees/
 .superpowers/
+.harness/
+.agents/skills/subagent-driven-implementation/
+.agents/skills/onepassword-environments/
+.agents/hooks/coding-agent-harness/
+.claude/skills/subagent-driven-implementation/
+.claude/skills/onepassword-environments/
+.claude/hooks/coding-agent-harness/
+.cursor/hooks/coding-agent-harness/
+.grok/skills/subagent-driven-implementation/
+.grok/skills/onepassword-environments/
