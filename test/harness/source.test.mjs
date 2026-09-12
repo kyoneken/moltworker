@@ -33,3 +33,15 @@ test('source verification rejects a symlinked source tree', async () => {
   await symlink(join(root, 'real'), join(root, 'alias-root/source'));
   assert.deepEqual(await verifySource(join(root, 'alias-root/source'), lockFor('apm.yml', contents)), { ok: false, reason: 'source-mismatch' });
 });
+
+test('source verification rejects traversal and symlinked lock members', async () => {
+  const root = await makeRoot();
+  roots.push(root);
+  const contents = 'name: test\n';
+  await write(root, 'source/apm.yml', contents);
+  const lock = lockFor('apm.yml', contents);
+  assert.deepEqual(await verifySource(join(root, 'source'), { ...lock, files: [{ ...lock.files[0], path: 'dir/../apm.yml' }] }), { ok: false, reason: 'invalid-config' });
+  await mkdir(join(root, 'outside'), { recursive: true });
+  await symlink(join(root, 'outside'), join(root, 'source/link'));
+  assert.deepEqual(await verifySource(join(root, 'source'), lock), { ok: false, reason: 'source-mismatch' });
+});

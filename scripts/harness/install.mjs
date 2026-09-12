@@ -1,267 +1,245 @@
-import { access, cp, mkdtemp, readFile, readdir, rm, writeFile, mkdir } from 'node:fs/promises';
+import { chmod, cp, lstat, mkdtemp, mkdir, readFile, readdir, rename, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join, dirname } from 'node:path';
-import { spawn } from 'node:child_process';
-import { hashText, loadState, saveState } from './state.mjs';
+import { dirname, join, resolve } from 'node:path';
+import { spawn, spawnSync } from 'node:child_process';
+import { loadState, saveState } from './state.mjs';
+import { applyOperations, restoreOperations } from './operations.mjs';
 import { onepasswordPlan } from './onepassword.mjs';
 import { cloudflarePlan } from './cloudflare.mjs';
+import { planNativeOperations } from './native.mjs';
 
 export const TARGETS = ['codex', 'claude', 'cursor', 'grok-build', 'antigravity'];
-const hookPath = { codex: ['.codex/hooks.json', 'hooks.PreToolUse'], claude: ['.claude/settings.json', 'hooks.PreToolUse'], cursor: ['.cursor/hooks.json', 'hooks.PreToolUse'], antigravity: ['.agents/hooks.json', 'apm.PreToolUse'] };
-const fixturePath = { codex: '.codex/settings.json', claude: '.claude/settings.json', cursor: '.cursor/settings.json', 'grok-build': '.grok/settings.json', antigravity: '.agents/settings.json' };
-
 const APM_VERSION = '0.29.0';
 const APM_TIMEOUT_MS = 20_000;
+const jsonMcpPath = { claude: '.mcp.json', cursor: '.cursor/mcp.json' };
+const tomlMcpPath = { codex: '.codex/config.toml', 'grok-build': '.grok/config.toml' };
 
 function run(command, args, cwd, timeoutMs = APM_TIMEOUT_MS) {
-  return new Promise((resolve) => {
+  return new Promise((done) => {
     const child = spawn(command, args, { cwd, stdio: ['ignore', 'pipe', 'pipe'] });
     let stdout = '';
-    const timer = setTimeout(() => child.kill('SIGTERM'), timeoutMs);
     child.stdout.on('data', (chunk) => { if (stdout.length < 4096) stdout += chunk; });
-    child.once('error', () => { clearTimeout(timer); resolve({ ok: false, stdout: '' }); });
-    child.once('exit', (code) => { clearTimeout(timer); resolve({ ok: code === 0, stdout }); });
+    // Consume stderr, but never surface its potentially-sensitive contents.
+    child.stderr.on('data', () => {});
+    const timer = setTimeout(() => child.kill('SIGKILL'), timeoutMs);
+    child.once('error', () => { clearTimeout(timer); done({ ok: false, stdout: '' }); });
+    child.once('exit', (code) => { clearTimeout(timer); done({ ok: code === 0, stdout }); });
   });
 }
 
-async function readJson(path) {
-  try { return JSON.parse(await readFile(path, 'utf8')); } catch { return {}; }
-}
-
 async function readText(path) {
-  try { return await readFile(path, 'utf8'); } catch { return null; }
+  try {
+    const stat = await lstat(path);
+    if (!stat.isFile() || stat.isSymbolicLink()) throw new Error('invalid-config');
+    return await readFile(path, 'utf8');
+  } catch (error) {
+    if (error?.code === 'ENOENT') return null;
+    throw error;
+  }
 }
 
-const cloudflareJsonPath = { claude: '.mcp.json', cursor: '.cursor/mcp.json', antigravity: '.agents/mcp.json' };
-
-async function addCloudflareConfig({ root, projectRoot, target, profile }) {
-  const jsonPath = cloudflareJsonPath[target];
-  if (jsonPath) {
-    const projectText = await readText(join(projectRoot, jsonPath));
-    const currentText = projectText ?? await readText(join(root, jsonPath));
-    let current = {};
-    if (currentText !== null) {
-      try { current = JSON.parse(currentText); } catch { return false; }
-    }
-    const planned = cloudflarePlan({ target, profile, existing: current.mcpServers ?? {} });
-    if (planned.status !== 'pass') return false;
-    current.mcpServers ??= {};
-    for (const server of planned.servers) current.mcpServers[server.name] = { type: 'http', url: server.url };
-    if (!planned.servers.length && currentText === null) return true;
-    await mkdir(dirname(join(root, jsonPath)), { recursive: true });
-    await writeFile(join(root, jsonPath), `${JSON.stringify(current, null, 2)}\n`);
-    return true;
+async function assertSafeAncestors(root, relativePath) {
+  const base = resolve(root);
+  const absolute = resolve(root, relativePath);
+  if (!absolute.startsWith(`${base}/`)) throw new Error('invalid-config');
+  let current = base;
+  for (const part of relativePath.split('/').slice(0, -1)) {
+    current = join(current, part);
+    try {
+      const stat = await lstat(current);
+      if (stat.isSymbolicLink() || !stat.isDirectory()) throw new Error('invalid-config');
+    } catch (error) { if (error?.code === 'ENOENT') break; throw error; }
   }
-
-  const configPath = target === 'codex' ? '.codex/config.toml' : '.grok/config.toml';
-  const projectText = await readText(join(projectRoot, configPath));
-  const stagedText = await readText(join(root, configPath));
-  const currentText = projectText ?? stagedText;
-  const text = currentText ?? '';
-  const existing = {};
-  const sectionPattern = /\[mcp_servers\.([^\]]+)\]([\s\S]*?)(?=\n\[|$)/g;
-  for (const match of text.matchAll(sectionPattern)) {
-    const url = match[2].match(/^url\s*=\s*"([^"]+)"/m)?.[1];
-    existing[match[1]] = { url };
-  }
-  const planned = cloudflarePlan({ target, profile, existing });
-  if (planned.status !== 'pass') return false;
-  const blocks = planned.servers.map((server) => `\n[mcp_servers.${server.name}]\nurl = "${server.url}"\n`).join('');
-  if (blocks || (projectText !== null && stagedText !== projectText)) {
-    await mkdir(dirname(join(root, configPath)), { recursive: true });
-    await writeFile(join(root, configPath), blocks ? `${text.trimEnd()}${blocks}\n` : text);
-  }
-  return true;
 }
 
 async function filesBelow(root, prefix = '') {
-  const entries = await readdir(join(root, prefix), { withFileTypes: true });
   const files = [];
-  for (const entry of entries) {
-    const relativePath = join(prefix, entry.name);
-    if (entry.isDirectory()) files.push(...await filesBelow(root, relativePath));
-    else if (entry.isFile()) files.push(relativePath);
+  for (const entry of await readdir(join(root, prefix), { withFileTypes: true })) {
+    const path = join(prefix, entry.name);
+    const stat = await lstat(join(root, path));
+    if (stat.isSymbolicLink()) throw new Error('invalid-config');
+    if (stat.isDirectory()) files.push(...await filesBelow(root, path));
+    else if (stat.isFile()) files.push({ path, text: await readFile(join(root, path), 'utf8') });
+    else throw new Error('invalid-config');
   }
   return files;
 }
 
-function sameJson(left, right) { return JSON.stringify(left) === JSON.stringify(right); }
-
-async function exists(path) {
-  try { await access(path); return true; } catch { return false; }
-}
-
-async function stage({ sourceDir, target, profile, projectRoot }) {
+async function stage({ sourceDir, target }) {
   const root = await mkdtemp(join(tmpdir(), 'moltworker-harness-stage-'));
   const command = process.env.HARNESS_APM_COMMAND || 'apm';
-  const version = await run(command, ['--version'], root, 5_000);
-  if (!version.ok || !version.stdout.includes(APM_VERSION)) { await rm(root, { recursive: true, force: true }); return null; }
-  await cp(sourceDir, join(root, 'source'), { recursive: true, dereference: false });
-  const localPath = './source';
-  const onepassword = onepasswordPlan({ target });
-  const useApmOnepassword = onepassword.status === 'pass' && target !== 'grok-build';
-  const mcp = useApmOnepassword
-    ? `  mcp:\n    - name: ${onepassword.server.name ?? '1password'}\n      registry: false\n      transport: stdio\n      command: ${onepassword.server.command}\n`
-    : '  mcp: []\n';
-  await writeFile(join(root, 'apm.yml'), `name: moltworker-harness-stage\nversion: \"0.0.0\"\ntargets: [${target}]\nincludes: []\ndependencies:\n  apm:\n    - path: '${localPath}'\n${mcp}`);
-  const installed = await run(command, ['install', '--only', 'apm', '--target', target, '--no-policy'], root);
-  const compiled = installed.ok && await run(command, ['compile', '--target', target], root);
-  if (!installed.ok || !compiled.ok) { await rm(root, { recursive: true, force: true }); return null; }
-  if (useApmOnepassword) {
-    const mcpInstalled = await run(command, ['install', '--only', 'mcp', '--target', target, '--no-policy'], root);
-    if (!mcpInstalled.ok) { await rm(root, { recursive: true, force: true }); return null; }
-  } else if (target === 'grok-build' && !(await readText(join(root, fixturePath[target])))) {
-    const grok = await run(process.env.HARNESS_GROK_COMMAND || 'grok', ['mcp', 'add', '--scope', 'project', '1password', '--', '1password-mcp'], root);
-    const config = await readText(join(root, '.grok/config.toml'));
-    if (!grok.ok || !config?.includes('1password-mcp')) { await rm(root, { recursive: true, force: true }); return null; }
+  try {
+    const version = await run(command, ['--version'], root, 5_000);
+    if (!version.ok || !new RegExp(`(?:^|\\s)${APM_VERSION.replaceAll('.', '\\.')}(?:\\s+\\([a-f0-9]+\\))?\\s*$`).test(version.stdout.trim())) throw new Error('invalid-config');
+    await cp(sourceDir, join(root, 'source'), { recursive: true, dereference: false, errorOnExist: true });
+    const onepassword = onepasswordPlan({ target });
+    const useApmOnepassword = onepassword.status === 'pass' && target !== 'grok-build';
+    const mcp = useApmOnepassword ? `  mcp:\n    - name: ${onepassword.server.name ?? '1password'}\n      registry: false\n      transport: stdio\n      command: ${onepassword.server.command}\n` : '  mcp: []\n';
+    await writeFile(join(root, 'apm.yml'), `name: moltworker-harness-stage\nversion: "0.0.0"\ntargets: [${target}]\nincludes: []\ndependencies:\n  apm:\n    - path: './source'\n${mcp}`);
+    const installed = await run(command, ['install', '--only', 'apm', '--target', target, '--no-policy'], root);
+    const compiled = installed.ok && await run(command, ['compile', '--target', target], root);
+    if (!installed.ok || !compiled.ok) throw new Error('invalid-config');
+    if (useApmOnepassword && !(await run(command, ['install', '--only', 'mcp', '--target', target, '--no-policy'], root)).ok) throw new Error('invalid-config');
+    if (target === 'grok-build' && !(await run(process.env.HARNESS_GROK_COMMAND || 'grok', ['mcp', 'add', '--scope', 'project', '1password', '--', '1password-mcp'], root)).ok) throw new Error('invalid-config');
+    return root;
+  } catch { await rm(root, { recursive: true, force: true }); return null; }
+}
+
+async function projectFilesFor(root, operations) {
+  const files = [];
+  const base = resolve(root);
+  for (const path of new Set(operations.map((operation) => operation.path))) {
+    const absolute = resolve(root, path);
+    if (!absolute.startsWith(`${base}/`)) throw new Error('invalid-config');
+    await assertSafeAncestors(root, path);
+    const text = await readText(absolute);
+    if (text !== null) files.push({ path, text });
   }
-  if (!(await addCloudflareConfig({ root, projectRoot, target, profile }))) { await rm(root, { recursive: true, force: true }); return null; }
-  return root;
+  return files;
+}
+
+function sourceDerivedPathOperations(target, generatedFiles) {
+  const allowed = target === 'codex'
+    ? [/^\.codex\/hooks\/source\//, /^\.codex\/rules\//, /^\.agents\/skills\//]
+    : target === 'antigravity' ? [/^\.agents\/skills\//, /^\.agents\/rules\//, /^\.agents\/hooks\/source\//]
+      : target === 'claude' ? [/^\.claude\/skills\//, /^\.claude\/rules\//, /^\.claude\/hooks\/source\//]
+        : target === 'cursor' ? [/^\.agents\/skills\//, /^\.cursor\/skills\//, /^\.cursor\/rules\//, /^\.cursor\/hooks\/source\//]
+          : target === 'grok-build' ? [/^\.grok\/skills\//, /^\.grok\/rules\//] : [];
+  return generatedFiles.filter((file) => allowed.some((pattern) => pattern.test(file.path))).map((file) => ({ kind: 'path', path: file.path, desired: file.text }));
+}
+
+function stagedOnepasswordOperations(target, generatedFiles) {
+  if (target === 'antigravity') return [];
+  const path = jsonMcpPath[target] ?? tomlMcpPath[target];
+  const generated = generatedFiles.find((file) => file.path === path);
+  if (!generated) throw new Error('invalid-config');
+  let parsed;
+  try {
+    if (jsonMcpPath[target]) parsed = JSON.parse(generated.text).mcpServers;
+    else {
+      const result = spawnSync('python3.11', ['-c', 'import sys,tomllib,json; print(json.dumps(tomllib.loads(sys.stdin.read()).get("mcp_servers", {})))'], {
+        input: generated.text, encoding: 'utf8', timeout: 5000, maxBuffer: 65536,
+      });
+      if (result.status !== 0) throw new Error('invalid-config');
+      parsed = JSON.parse(result.stdout);
+    }
+  } catch { throw new Error('invalid-config'); }
+  const entry = parsed?.['1password'];
+  // APM emits a registry identifier; it is metadata, not native launch configuration.
+  if (entry && typeof entry.id === 'string') delete entry.id;
+  if (!entry || onepasswordPlan({ target, existing: { '1password': entry } }).status !== 'pass') throw new Error('invalid-config');
+  if (jsonMcpPath[target]) return [{ kind: 'json-key', path, pointer: '/mcpServers/1password', desired: entry }];
+  return [{ kind: 'toml-block', path, marker: 'onepassword', desired: '[mcp_servers."1password"]\ncommand = "1password-mcp"\nargs = []' }];
+}
+
+function cloudflareOperations(target, profile, projectFiles, previousState) {
+  const planned = cloudflarePlan({ target, profile, existing: {} });
+  if (planned.status === 'skipped') return [];
+  if (planned.status !== 'pass') throw new Error('invalid-config');
+  const jsonPath = jsonMcpPath[target];
+  if (jsonPath) {
+    const file = projectFiles.find((entry) => entry.path === jsonPath);
+    if (file) try { if (!JSON.parse(file.text) || Array.isArray(JSON.parse(file.text))) throw new Error('conflict'); } catch (error) { throw error?.message === 'conflict' ? error : new Error('conflict'); }
+    return planned.servers.map((server) => ({ kind: 'json-key', path: jsonPath, pointer: `/mcpServers/${server.name}`, desired: { type: 'http', url: server.url } }));
+  }
+  const tomlPath = tomlMcpPath[target];
+  if (!tomlPath) return []; // Antigravity remote project MCP is explicitly unsupported.
+  return planned.servers.map((server) => ({ kind: 'toml-block', path: tomlPath, marker: `cloudflare-${server.name}`, desired: `[mcp_servers.${server.name}]\nurl = "${server.url}"` }));
 }
 
 export async function planInstall({ root, target, sourceDir, profile = 'base' }) {
   if (!TARGETS.includes(target) || !['base', 'observability'].includes(profile)) return { ok: false, reason: 'invalid-config' };
-  const staging = await stage({ sourceDir, target, profile, projectRoot: root });
+  const staging = await stage({ sourceDir, target });
   if (!staging) return { ok: false, reason: 'invalid-config' };
   try {
-    const path = hookPath[target]?.[0];
-    const fixture = await readJson(join(staging, fixturePath[target]));
-    if (Object.hasOwn(fixture, 'harness')) {
-      const current = await readJson(join(root, fixturePath[target]));
-      const state = await loadState(root, target);
-      const desired = fixture.harness;
-      if (Object.hasOwn(current, 'harness') && (!state || hashText(JSON.stringify(current.harness)) !== state.operations?.[0]?.afterHash)) return { ok: false, reason: 'conflict' };
-      const operations = [{ target, kind: 'json-key', path: fixturePath[target], ownership: 'harness', desired, beforeHash: Object.hasOwn(current, 'harness') ? hashText(JSON.stringify(current.harness)) : null }];
-      for (const relativePath of await filesBelow(staging)) {
-        const targetPrefix = `.${target === 'grok-build' ? 'grok' : target === 'antigravity' ? 'agents' : target}/`;
-        const isClaudeMcp = target === 'claude' && relativePath === '.mcp.json';
-        if (relativePath === fixturePath[target] || (!relativePath.startsWith(targetPrefix) && !isClaudeMcp)) continue;
-        const stagedPath = join(staging, relativePath);
-        const stagedText = await readFile(stagedPath, 'utf8');
-        try {
-          const currentText = await readFile(join(root, relativePath), 'utf8');
-          if (currentText !== stagedText) return { ok: false, reason: 'conflict' };
-          const previous = state?.operations?.find((entry) => entry.kind === 'path' && entry.path === relativePath);
-          if (previous) operations.push({ target, kind: 'path', path: relativePath, ownership: relativePath, desired: stagedText, beforeHash: previous.beforeHash });
-        } catch { operations.push({ target, kind: 'path', path: relativePath, ownership: relativePath, desired: stagedText, beforeHash: null }); }
-      }
-      return { ok: true, operations };
+    const generatedFiles = await filesBelow(staging);
+    const nativePaths = ['.codex/hooks.json', '.agents/hooks.json', '.claude/settings.json', '.cursor/hooks.json'];
+    const secretSafetyText = generatedFiles.find((file) => file.path === 'source/.apm/instructions/secret-safety.instructions.md')?.text;
+    const native = await planNativeOperations({ target, generatedFiles, secretSafetyText, projectFiles: await projectFilesFor(root, nativePaths.map((path) => ({ path }))) });
+    if (native.status === 'fail') return { ok: false, reason: native.reason ?? 'invalid-config' };
+    const nativeOperations = native.status === 'skipped' ? [] : native.operations;
+    const state = await loadState(root, target);
+    const providerFiles = await projectFilesFor(root, [...nativeOperations, ...(jsonMcpPath[target] ? [{ path: jsonMcpPath[target] }] : []), ...(tomlMcpPath[target] ? [{ path: tomlMcpPath[target] }] : [])]);
+    const proposed = [...sourceDerivedPathOperations(target, generatedFiles).filter((operation) => !nativeOperations.some((native) => native.kind === 'path' && native.path === operation.path)), ...nativeOperations, ...stagedOnepasswordOperations(target, generatedFiles), ...cloudflareOperations(target, profile, providerFiles, state)];
+    // A file created by a prior owned operation remains part of the desired
+    // transaction, so reapply can verify ownership instead of adopting it.
+    const operations = proposed;
+    const files = await projectFilesFor(root, [...operations, ...(state?.operations ?? [])]);
+    applyOperations(files, operations, state ?? undefined);
+    return { ok: true, root, target, operations };
+  } catch (error) { return { ok: false, reason: error?.message === 'conflict' ? 'conflict' : 'invalid-config' }; }
+  finally { await rm(staging, { recursive: true, force: true }); }
+}
+
+async function writeTransaction(root, before, after) {
+  const snapshots = new Map(before.map((file) => [file.path, file.text]));
+  const changed = new Set([...snapshots.keys(), ...after.map((file) => file.path)]);
+  const written = [];
+  try {
+    for (const path of changed) {
+      const next = after.find((file) => file.path === path);
+      const absolute = join(root, path);
+      await assertSafeAncestors(root, path);
+      if (await readText(absolute) !== (snapshots.get(path) ?? null)) throw new Error('conflict');
+      if (next?.text === snapshots.get(path)) continue;
+      if (!next) { await rm(absolute, { force: true }); written.push(path); continue; }
+      await mkdir(dirname(absolute), { recursive: true });
+      const temporary = `${absolute}.harness-${process.pid}-${Date.now()}`;
+      const mode = snapshots.has(path) ? (await lstat(absolute)).mode & 0o777 : 0o600;
+      try {
+        await writeFile(temporary, next.text, { flag: 'wx', mode });
+        await rename(temporary, absolute);
+      } finally { await rm(temporary, { force: true }); }
+      if (path.endsWith('.sh')) await chmod(absolute, 0o755);
+      written.push(path);
     }
-    const operations = [];
-    const previousState = await loadState(root, target);
-    for (const relativePath of await filesBelow(staging)) {
-      if (!/^(\.codex|\.claude|\.cursor|\.grok|\.agents)\//.test(relativePath)) continue;
-      const stagedPath = join(staging, relativePath);
-      if (relativePath === hookPath[target]?.[0]) {
-        const staged = await readJson(stagedPath);
-        if (!Array.isArray(staged.hooks?.PreToolUse)) continue;
-        const current = await readJson(join(root, relativePath));
-        const [owner, key] = hookPath[target][1].split('.');
-        const existing = current[owner]?.[key] ?? [];
-        const state = await loadState(root, target);
-        const owned = staged.hooks.PreToolUse;
-        const alreadyOwned = owned.every((entry) => existing.some((currentEntry) => sameJson(currentEntry, entry)));
-        if (alreadyOwned && !state) return { ok: false, reason: 'conflict' };
-        operations.push({ target, kind: 'json-array', path: relativePath, ownership: hookPath[target]?.[1] ?? 'hooks.PreToolUse', desired: owned, beforeHash: hashText(JSON.stringify(existing)), beforeExists: await exists(join(root, relativePath)) });
-      } else {
-        const desired = await readFile(stagedPath, 'utf8');
-        try {
-          const current = await readFile(join(root, relativePath), 'utf8');
-          if (current === desired) {
-            const previous = previousState?.operations?.find((entry) => entry.kind === 'path' && entry.path === relativePath);
-            if (previous) operations.push({ target, kind: 'path', path: relativePath, ownership: relativePath, desired, beforeHash: previous.beforeHash });
-            continue;
-          }
-          return { ok: false, reason: 'conflict' };
-        } catch { operations.push({ target, kind: 'path', path: relativePath, ownership: relativePath, desired, beforeHash: null }); }
-      }
-    }
-    if (operations.length) return { ok: true, operations };
-    return (await loadState(root, target)) ? { ok: true, operations: [] } : { ok: false, reason: 'invalid-config' };
-  } finally { await rm(staging, { recursive: true, force: true }); }
+  } catch (error) {
+    const residual = [];
+    for (const path of written.reverse()) try {
+      await assertSafeAncestors(root, path);
+      const expected = after.find((file) => file.path === path)?.text ?? null;
+      if (await readText(join(root, path)) !== expected) { residual.push(path); continue; }
+      const old = snapshots.get(path);
+      if (old === undefined) await rm(join(root, path), { force: true });
+      else await writeFile(join(root, path), old);
+    } catch { residual.push(path); }
+    throw Object.assign(new Error(error?.message === 'conflict' ? 'conflict' : 'invalid-config'), { residual });
+  }
 }
 
 export async function applyInstall(plan) {
   if (!plan.ok) return plan;
-  if (plan.operations.length === 0) return { ok: true };
-  for (const operation of plan.operations) {
-    if (operation.kind === 'path') continue;
-    const current = await readJson(join(plan.root, operation.path));
-    if (operation.kind === 'json-array') {
-      const [owner, key] = operation.ownership.split('.');
-      const existing = current[owner]?.[key] ?? [];
-      if (!operation.desired.every((entry) => existing.some((present) => sameJson(present, entry))) && hashText(JSON.stringify(existing)) !== operation.beforeHash) return { ok: false, reason: 'conflict' };
-      continue;
-    }
-    const existingHash = Object.hasOwn(current, operation.ownership) ? hashText(JSON.stringify(current[operation.ownership])) : null;
-    if (existingHash !== operation.beforeHash && JSON.stringify(current[operation.ownership]) !== JSON.stringify(operation.desired)) return { ok: false, reason: 'conflict' };
-  }
-  const applied = [];
   try {
-    for (const operation of plan.operations) {
-      const path = join(plan.root, operation.path);
-      if (operation.kind === 'path') {
-        await mkdir(dirname(path), { recursive: true });
-        await writeFile(path, operation.desired);
-        applied.push(operation);
-        continue;
-      }
-      const current = await readJson(path);
-      if (operation.kind === 'json-array') {
-        const [owner, key] = operation.ownership.split('.');
-        current[owner] ??= {};
-        current[owner][key] ??= [];
-        for (const entry of operation.desired) if (!current[owner][key].some((present) => sameJson(present, entry))) current[owner][key].push(entry);
-      } else current[operation.ownership] = operation.desired;
-      await mkdir(dirname(path), { recursive: true });
-      await writeFile(path, `${JSON.stringify(current, null, 2)}\n`);
-      applied.push(operation);
-    }
-    for (const operation of plan.operations) {
-      await saveState(plan.root, operation.target, { schemaVersion: 1, operations: plan.operations.map((entry) => ({ kind: entry.kind, path: entry.path, ownership: entry.ownership, beforeHash: entry.beforeHash, beforeExists: entry.beforeExists, afterHash: entry.kind === 'path' ? hashText(entry.desired) : hashText(JSON.stringify(entry.desired)), entryHashes: entry.kind === 'json-array' ? entry.desired.map((value) => hashText(JSON.stringify(value))) : undefined })) });
-    }
+    const state = await loadState(plan.root, plan.target);
+    const before = await projectFilesFor(plan.root, [...plan.operations, ...(state?.operations ?? [])]);
+    const applied = applyOperations(before, plan.operations, state ?? undefined);
+    await writeTransaction(plan.root, before, applied.files);
+    try { await saveState(plan.root, plan.target, applied.state); }
+    catch (error) { await writeTransaction(plan.root, applied.files, before); return { ok: false, reason: 'invalid-config', residual: error?.residual ?? [] }; }
     return { ok: true };
-  } catch {
-    const residual = [];
-    for (const operation of applied.reverse()) {
-      const path = join(plan.root, operation.path);
-      if (operation.kind === 'path') continue;
-      const current = await readJson(path);
-      if (Object.hasOwn(current, operation.ownership) && hashText(JSON.stringify(current[operation.ownership])) === hashText(JSON.stringify(operation.desired))) {
-        delete current[operation.ownership];
-        await writeFile(path, `${JSON.stringify(current, null, 2)}\n`);
-      } else residual.push({ path: operation.path, ownership: operation.ownership });
-    }
-    return { ok: false, reason: 'invalid-config', residual };
-  }
+  } catch (error) { return { ok: false, reason: error?.message === 'conflict' ? 'conflict' : 'invalid-config', residual: error?.residual }; }
+}
+
+export async function verifyInstall({ root, target }) {
+  if (!TARGETS.includes(target)) return { ok: false, reason: 'invalid-config' };
+  try {
+    const state = await loadState(root, target);
+    if (!state) return { ok: false, reason: 'invalid-config' };
+    applyOperations(await projectFilesFor(root, state.operations), state.operations, state);
+    return { ok: true };
+  } catch (error) { return { ok: false, reason: error?.message === 'conflict' ? 'conflict' : 'invalid-config' }; }
 }
 
 export async function restoreInstall({ root, target }) {
-  const state = await loadState(root, target);
-  if (!state?.operations) return { ok: false, reason: 'invalid-config' };
-  for (const operation of state.operations) {
-    if (operation.kind === 'path') {
-      try {
-        if (hashText(await readFile(join(root, operation.path), 'utf8')) !== operation.afterHash) return { ok: false, reason: 'conflict' };
-      } catch { return { ok: false, reason: 'conflict' }; }
-      continue;
-    }
-    const current = await readJson(join(root, operation.path));
-    const [owner, key] = operation.ownership.split('.');
-    const owned = operation.kind === 'json-array' ? current[owner]?.[key] : current[operation.ownership];
-    if (!owned || (operation.kind === 'json-array' ? !operation.entryHashes?.every((entryHash) => owned.some((entry) => hashText(JSON.stringify(entry)) === entryHash)) : hashText(JSON.stringify(owned)) !== operation.afterHash)) return { ok: false, reason: 'conflict' };
-  }
-  for (const operation of state.operations) {
-    const path = join(root, operation.path);
-    if (operation.kind === 'path') { await rm(path, { force: true }); continue; }
-    const current = await readJson(path);
-    if (operation.kind === 'json-array') {
-      const [owner, key] = operation.ownership.split('.');
-      current[owner][key] = current[owner][key].filter((entry) => !operation.entryHashes.includes(hashText(JSON.stringify(entry))));
-      if (operation.beforeExists === false && Object.keys(current).length === 1 && Object.keys(current[owner] ?? {}).length === 1 && Array.isArray(current[owner][key]) && current[owner][key].length === 0) { await rm(path, { force: true }); continue; }
-    }
-    else delete current[operation.ownership];
-    await writeFile(path, `${JSON.stringify(current, null, 2)}\n`);
-  }
-  return { ok: true };
+  if (!TARGETS.includes(target)) return { ok: false, reason: 'invalid-config' };
+  try {
+    const state = await loadState(root, target);
+    if (!state) return { ok: false, reason: 'invalid-config' };
+    const before = await projectFilesFor(root, [...state.operations, ...(state.previousOperations ?? [])]);
+    const restored = restoreOperations(before, state);
+    await writeTransaction(root, before, restored.files);
+    if (restored.state.operations.length === 0) await rm(join(root, '.harness/state', `${target}.json`), { force: true });
+    else await saveState(root, target, restored.state);
+    return { ok: true };
+  } catch (error) { return { ok: false, reason: error?.message === 'conflict' ? 'conflict' : 'invalid-config', residual: error?.residual }; }
 }

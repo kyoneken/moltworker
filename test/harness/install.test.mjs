@@ -1,7 +1,8 @@
+import { fakeProviderOutput } from './helpers.mjs';
 import assert from 'node:assert/strict';
 import { test, afterEach } from 'node:test';
 import { createHash } from 'node:crypto';
-import { chmod } from 'node:fs/promises';
+import { chmod, appendFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { makeRoot, removeRoot, read, readManagedConfiguration, readUnmanagedConfiguration, runHarness, write } from './helpers.mjs';
 
@@ -26,9 +27,10 @@ async function fixture() {
     files: [{ path: 'apm.yml', sha256: sha256(manifest) }],
   }));
   await write(root, '.codex/settings.json', JSON.stringify({ existingPolicy: { keep: true } }));
-  await write(root, 'fake-apm.mjs', `#!/usr/bin/env node\nimport { mkdirSync, writeFileSync } from 'node:fs';\nimport { join } from 'node:path';\nconst args = process.argv.slice(2);\nif (args[0] === '--version') { console.log('APM 0.29.0'); process.exit(0); }\nif (args[0] === 'compile') { process.exit(0); }\nconst target = args[args.indexOf('--target') + 1];\nconst paths = { codex: '.codex/settings.json', claude: '.claude/settings.json', cursor: '.cursor/settings.json', 'grok-build': '.grok/settings.json', antigravity: '.agents/settings.json' };\nconst path = join(process.cwd(), paths[target]);\nmkdirSync(join(path, '..'), { recursive: true });\nwriteFileSync(path, JSON.stringify({ harness: { provider: target } }));\n`);
+  await write(root, 'fake-apm.mjs', `#!/usr/bin/env node\nimport { mkdirSync, writeFileSync } from 'node:fs';\nimport { join } from 'node:path';\nconst args = process.argv.slice(2);\nif (args[0] === '--version') { console.log('APM 0.29.0'); process.exit(0); }\nif (args[0] === 'compile') { process.exit(0); }\nconst target = args[args.indexOf('--target') + 1];\nconst paths = { codex: '.codex/hooks.json', claude: '.claude/settings.json', cursor: '.cursor/settings.json', 'grok-build': '.grok/settings.json', antigravity: '.agents/settings.json' };\nconst path = join(process.cwd(), paths[target]);\nmkdirSync(join(path, '..'), { recursive: true });\nwriteFileSync(path, JSON.stringify({ hooks: { PreToolUse: [{ matcher: 'Bash', hooks: [{ type: 'command', command: 'policy' }] }] } }));\n`);
+  await appendFile(join(root, 'fake-apm.mjs'), fakeProviderOutput);
   await chmod(join(root, 'fake-apm.mjs'), 0o755);
-  return { root, source, env: { HARNESS_APM_COMMAND: join(root, 'fake-apm.mjs') } };
+  return { root, source, env: { HARNESS_APM_COMMAND: join(root, 'fake-apm.mjs'), HARNESS_GROK_COMMAND: '/usr/bin/true' } };
 }
 
 test('bootstrap applies only an owned JSON key and is idempotent', async () => {
@@ -63,7 +65,7 @@ test('bootstrap rejects a modified fixed-SHA source before changing configuratio
 
 test('bootstrap rejects an existing non-owned key collision without revealing its value', async () => {
   const { root, source, env } = await fixture();
-  await write(root, '.codex/settings.json', JSON.stringify({ existingPolicy: { keep: true }, harness: { token: 'secret-value' } }));
+  await write(root, '.codex/hooks.json', JSON.stringify({ hooks: { PreToolUse: 'secret-value' } }));
   const result = await runHarness(['bootstrap', '--target', 'codex', '--source', source], { root, env });
   assert.equal(result.code, 1);
   assert.match(result.stdout, /conflict/);
@@ -72,7 +74,7 @@ test('bootstrap rejects an existing non-owned key collision without revealing it
 
 test('bootstrap does not adopt an identical non-owned managed key', async () => {
   const { root, source, env } = await fixture();
-  await write(root, '.codex/settings.json', JSON.stringify({ existingPolicy: { keep: true }, harness: { provider: 'codex' } }));
+  await write(root, '.codex/hooks.json', JSON.stringify({ hooks: { PreToolUse: [{ matcher: 'Bash', hooks: [{ type: 'command', command: 'policy' }] }] } }));
   const result = await runHarness(['bootstrap', '--target', 'codex', '--source', source], { root, env });
   assert.equal(result.code, 1);
   assert.match(result.stdout, /conflict/);
@@ -81,9 +83,9 @@ test('bootstrap does not adopt an identical non-owned managed key', async () => 
 test('restore refuses to overwrite a human change to an owned delta', async () => {
   const { root, source, env } = await fixture();
   assert.equal((await runHarness(['bootstrap', '--target', 'codex', '--source', source], { root, env })).code, 0);
-  await write(root, '.codex/settings.json', JSON.stringify({ existingPolicy: { keep: true }, harness: { human: true } }));
+  await write(root, '.codex/hooks.json', JSON.stringify({ hooks: { PreToolUse: [], human: true } }));
   const result = await runHarness(['restore', '--target', 'codex'], { root });
   assert.equal(result.code, 1);
   assert.match(result.stdout, /conflict/);
-  assert.match(await read(root, '.codex/settings.json'), /human/);
+  assert.match(await read(root, '.codex/hooks.json'), /human/);
 });

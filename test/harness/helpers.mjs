@@ -38,8 +38,8 @@ export async function runHarness(args, { root, env = {} }) {
 }
 
 export async function readManagedConfiguration(root) {
-  const config = JSON.parse(await read(root, '.codex/settings.json'));
-  return config.harness;
+  const config = JSON.parse(await read(root, '.codex/hooks.json'));
+  return config.hooks.PreToolUse;
 }
 
 export async function readUnmanagedConfiguration(root) {
@@ -47,3 +47,14 @@ export async function readUnmanagedConfiguration(root) {
   const { harness, ...unmanaged } = config;
   return unmanaged;
 }
+
+// Public synthetic provider output; no private source or live credentials.
+export const fakeProviderOutput = `
+const providerPath = { codex: '.codex/config.toml', claude: '.mcp.json', cursor: '.cursor/mcp.json', 'grok-build': '.grok/config.toml' }[target];
+if (providerPath) {
+  mkdirSync(join(process.cwd(), providerPath, '..'), { recursive: true });
+  writeFileSync(join(process.cwd(), providerPath), providerPath.endsWith('.toml')
+    ? '[mcp_servers."1password"]\\ncommand = "1password-mcp"\\n'
+    : JSON.stringify({ mcpServers: { '1password': { command: '1password-mcp' } } }));
+}
+`;

@@ -87,7 +87,7 @@ function cloneFiles(inputFiles) {
   return inputFiles.map((file) => {
     if (!file || typeof file !== 'object' || Array.isArray(file) || typeof file.path !== 'string' || typeof file.text !== 'string' || seen.has(file.path)) fail('invalid-config');
     seen.add(file.path);
-    return { path: file.path, text: file.text };
+    return { path: file.path, text: file.text, missing: file.missing === true };
   });
 }
 
@@ -195,6 +195,8 @@ function validateStateEntry(raw) {
     details.blockPrefix = raw.blockPrefix;
   }
   const entry = entryFor(operation, details);
+  if (raw.createdFile !== undefined && raw.createdFile !== true && raw.createdFile !== false) fail('invalid-config');
+  if (raw.createdFile === true) entry.createdFile = true;
   if (raw.afterHash !== entry.afterHash) fail('invalid-config');
   if (operation.kind === 'json-array') {
     if (!Array.isArray(raw.entryHashes) || raw.entryHashes.length !== entry.entryHashes.length || raw.entryHashes.some((value, index) => value !== entry.entryHashes[index])) fail('invalid-config');
@@ -251,6 +253,7 @@ function removeOwned(files, entries) {
       const found = findOwnedBlock(file.text, entry, entry);
       file.text = file.text.slice(0, found.offset) + file.text.slice(found.offset + found.insertion.length);
       if (entry.kind === 'toml-block') validateToml(file.text);
+      if (entry.createdFile && file.text.trim() === '') files.splice(files.indexOf(file), 1);
       continue;
     }
     const json = parseJson(file.text);
@@ -263,6 +266,7 @@ function removeOwned(files, entries) {
     }
     cleanCreatedParents(json, entry.createdParents);
     file.text = serializeJson(json);
+    if (entry.createdFile && Object.keys(json).length === 0) files.splice(files.indexOf(file), 1);
   }
 }
 
@@ -277,7 +281,13 @@ function applyFresh(files, operations) {
       entries.push(entryFor(operation));
       continue;
     }
-    if (!file) fail('conflict');
+    const createdFile = !file || file.missing === true;
+    if (!file) {
+      if (operation.kind === 'markdown-block' || operation.kind === 'toml-block') file = { path: operation.path, text: '', missing: true };
+      else file = { path: operation.path, text: '{}\n', missing: true };
+      files.push(file);
+    }
+    file.missing = false;
     if (operation.kind === 'markdown-block' || operation.kind === 'toml-block') {
       if (operation.kind === 'toml-block') validateToml(file.text);
       const { core, token } = blockParts(operation);
@@ -289,7 +299,7 @@ function applyFresh(files, operations) {
         try { validateToml(candidate); } catch { fail('conflict'); }
       }
       file.text = candidate;
-      entries.push(entryFor(operation, { blockPrefix }));
+      entries.push(entryFor(operation, { blockPrefix, ...(createdFile ? { createdFile: true } : {}) }));
       continue;
     }
     const json = parseJson(file.text);
@@ -308,7 +318,7 @@ function applyFresh(files, operations) {
       array.push(...jsonClone(operation.desired));
     }
     file.text = serializeJson(json);
-    entries.push(entryFor(operation, { createdParents: target.createdParents }));
+    entries.push(entryFor(operation, { createdParents: target.createdParents, ...(createdFile ? { createdFile: true } : {}) }));
   }
   return entries;
 }
@@ -338,6 +348,6 @@ export function restoreOperations(inputFiles, state) {
   const normalizedState = normalizeState(state);
   verifyOwned(files, normalizedState.operations);
   removeOwned(files, normalizedState.operations);
-  applyFresh(files, normalizedState.previousOperations.map(normalizeOperation));
-  return { files };
+  const restoredEntries = applyFresh(files, normalizedState.previousOperations.map(normalizeOperation));
+  return { files, state: { schemaVersion: 1, operations: restoredEntries, previousOperations: [] } };
 }

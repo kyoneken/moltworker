@@ -29,7 +29,7 @@ export async function verifySource(sourceDir, lock) {
   }
   const paths = new Set();
   for (const file of lock.files) {
-    if (paths.has(file?.path)) return { ok: false, reason: 'invalid-config' };
+    if (!safeRelativePath(file?.path) || !/^[0-9a-f]{64}$/.test(file?.sha256 ?? '') || paths.has(file.path)) return { ok: false, reason: 'invalid-config' };
     paths.add(file?.path);
   }
   try {
@@ -41,7 +41,6 @@ export async function verifySource(sourceDir, lock) {
     return { ok: false, reason: 'source-mismatch' };
   }
   for (const file of lock.files) {
-    if (!safeRelativePath(file.path) || !/^[0-9a-f]{64}$/.test(file.sha256 ?? '')) return { ok: false, reason: 'invalid-config' };
     try {
       const stat = await lstat(join(sourceDir, file.path));
       if (!stat.isFile() || stat.isSymbolicLink()) return { ok: false, reason: 'source-mismatch' };

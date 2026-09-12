@@ -37,6 +37,8 @@ jobs:
 
   harness:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
 
     steps:
       - uses: actions/checkout@v4
@@ -49,6 +51,11 @@ jobs:
 
       - name: Install dependencies
         run: npm ci
+
+      - name: Setup Python for TOML validation
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
 
       - name: Run harness tests
         run: npm run test:harness

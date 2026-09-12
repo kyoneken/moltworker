@@ -32,3 +32,24 @@ test('toml returned text is valid TOML and array restore rejects duplicate owned
   const applied = applyOperations([{ path: 'x.json', text: JSON.stringify({ hooks: { PreToolUse: [] } }) }], [{ kind: 'json-array', path: 'x.json', pointer: '/hooks/PreToolUse', desired: [{ command: 'owned' }] }]);
   assert.throws(() => restoreOperations([{ path: 'x.json', text: JSON.stringify({ hooks: { PreToolUse: [{ command: 'owned' }, { command: 'owned' }] } }) }], applied.state), /conflict/);
 });
+
+test('restore preserves an adjacent human key in a file created for owned operations', () => {
+  const operations = [
+    { kind: 'json-key', path: 'new.json', pointer: '/version', desired: 1 },
+    { kind: 'json-array', path: 'new.json', pointer: '/hooks/PreToolUse', desired: [{ command: 'owned' }] },
+  ];
+  const applied = applyOperations([], operations);
+  const humanEdited = applied.files.map((file) => file.path === 'new.json' ? { ...file, text: JSON.stringify({ ...JSON.parse(file.text), human: true }) } : file);
+  const restored = restoreOperations(humanEdited, applied.state);
+  assert.deepEqual(JSON.parse(restored.files.find((file) => file.path === 'new.json').text), { human: true });
+});
+
+test('restore preserves human TOML added after creation of a managed file', () => {
+  const operation = { kind: 'toml-block', path: '.codex/config.toml', marker: 'test', desired: '[mcp_servers.test]\ncommand = "test"' };
+  const installed = applyOperations([], [operation]);
+  installed.files[0].text += '\n[human]\nkeep = true\n';
+  const restored = restoreOperations(installed.files, installed.state);
+  assert.equal(restored.files.length, 1);
+  assert.match(restored.files[0].text, /keep = true/);
+  assert.doesNotMatch(restored.files[0].text, /mcp_servers/);
+});

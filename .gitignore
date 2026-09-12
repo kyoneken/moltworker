@@ -66,6 +66,7 @@ test/e2e/.dev.vars
 .worktrees/
 .superpowers/
 .harness/
+.codex/rules/secret-safety.md
 .agents/skills/subagent-driven-implementation/
 .agents/skills/onepassword-environments/
 .agents/hooks/coding-agent-harness/
@@ -75,3 +76,18 @@ test/e2e/.dev.vars
 .cursor/hooks/coding-agent-harness/
 .grok/skills/subagent-driven-implementation/
 .grok/skills/onepassword-environments/
+
+# Private locked-source output (never publish source-derived instructions)
+.codex/rules/secret-safety.md
+.claude/rules/secret-safety.md
+.cursor/rules/secret-safety.mdc
+.grok/rules/secret-safety.instructions.md
+.agents/rules/secret-safety.md
+.codex/hooks/source/
+.claude/hooks/source/
+.cursor/hooks/source/
+.agents/hooks/source/
+.codex/apm-hooks.json
+.claude/apm-hooks.json
+.cursor/apm-hooks.json
+.agents/apm-hooks.json

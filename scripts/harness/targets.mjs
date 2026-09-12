@@ -1,11 +1,11 @@
 export const TARGETS = ['codex', 'claude', 'cursor', 'grok-build', 'antigravity'];
 
 export const TARGET_CAPABILITIES = Object.freeze({
-  codex: { instructions: 'AGENTS.md', skills: '.agents/skills', hooks: '.codex/hooks.json', mcp: 'stdio+remote' },
-  claude: { instructions: '.claude/rules', skills: '.claude/skills', hooks: '.claude/settings.json', mcp: 'stdio+remote' },
-  cursor: { instructions: '.cursor/rules', skills: '.agents/skills', hooks: '.cursor/hooks.json', mcp: 'stdio+remote' },
-  'grok-build': { instructions: '.grok/rules', skills: '.grok/skills', hooks: 'unsupported', mcp: 'stdio+remote' },
-  antigravity: { instructions: '.agents/rules', skills: '.agents/skills', hooks: '.agents/hooks.json', mcp: 'stdio+remote' },
+  codex: { instructions: 'AGENTS.md', skills: '.agents/skills', hooks: '.codex/hooks.json', mcp: 'stdio+remote', mcpConfig: '.codex/config.toml' },
+  claude: { instructions: '.claude/rules', skills: '.claude/skills', hooks: '.claude/settings.json', mcp: 'stdio+remote', mcpConfig: '.mcp.json' },
+  cursor: { instructions: '.cursor/rules', skills: '.agents/skills', hooks: '.cursor/hooks.json', mcp: 'stdio+remote', mcpConfig: '.cursor/mcp.json' },
+  'grok-build': { instructions: '.grok/rules', skills: '.grok/skills', hooks: 'unsupported', mcp: 'stdio+remote', mcpConfig: '.grok/config.toml' },
+  antigravity: { instructions: '.agents/rules', skills: '.agents/skills', hooks: '.agents/hooks.json', mcp: 'unsupported' },
 });
 
 export function targetPlan({ target } = {}) {

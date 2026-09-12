@@ -15,3 +15,9 @@ test('Antigravity is explicitly incompatible and static checks stay unverified',
   assert.equal(onepasswordPlan({ target: 'antigravity' }).reason, 'incompatible');
   assert.equal(doctorOnepassword({ target: 'codex' }).reason, 'live-check-not-run');
 });
+
+test('a same-name unmanaged server and secret-bearing fields are conflicts', () => {
+  assert.equal(onepasswordPlan({ target: 'codex', existing: { '1password': { command: 'other' } } }).reason, 'conflict');
+  assert.equal(onepasswordPlan({ target: 'codex', existing: { '1password': { command: '1password-mcp', env: { TOKEN: 'secret' } } } }).reason, 'conflict');
+  assert.equal(onepasswordPlan({ target: 'codex', existing: { '1password': { command: '1password-mcp', args: [], env: {} } } }).server, undefined);
+});

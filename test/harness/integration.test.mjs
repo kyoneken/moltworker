@@ -1,6 +1,7 @@
+import { fakeProviderOutput } from './helpers.mjs';
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
-import { chmod } from 'node:fs/promises';
+import { chmod, appendFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { test, afterEach } from 'node:test';
 import { makeRoot, read, removeRoot, runHarness, write } from './helpers.mjs';
@@ -26,7 +27,7 @@ async function fixture({ malformed = false } = {}) {
     files: [{ path: 'apm.yml', sha256: sha256(manifest) }],
   }));
   await write(root, '.codex/settings.json', JSON.stringify({ policy: { keep: true } }));
-  const output = malformed ? '{not-json' : JSON.stringify({ harness: { provider: 'codex' } });
+  const output = malformed ? '{not-json' : JSON.stringify({ hooks: { PreToolUse: [{ matcher: 'Bash', hooks: [{ type: 'command', command: 'policy' }] }] } });
   await write(root, 'fake-apm.mjs', `#!/usr/bin/env node
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -34,13 +35,14 @@ const args = process.argv.slice(2);
 if (args[0] === '--version') { console.log('APM 0.29.0'); process.exit(0); }
 if (args[0] === 'compile') { process.exit(0); }
 const target = args[args.indexOf('--target') + 1];
-const paths = { codex: '.codex/settings.json', claude: '.claude/settings.json', cursor: '.cursor/settings.json', 'grok-build': '.grok/settings.json', antigravity: '.agents/settings.json' };
+const paths = { codex: '.codex/hooks.json', claude: '.claude/settings.json', cursor: '.cursor/settings.json', 'grok-build': '.grok/settings.json', antigravity: '.agents/settings.json' };
 const path = join(process.cwd(), paths[target]);
 mkdirSync(join(path, '..'), { recursive: true });
 writeFileSync(path, ${JSON.stringify(output)});
 `);
+  await appendFile(join(root, 'fake-apm.mjs'), fakeProviderOutput);
   await chmod(join(root, 'fake-apm.mjs'), 0o755);
-  return { root, source, env: { HARNESS_APM_COMMAND: join(root, 'fake-apm.mjs') } };
+  return { root, source, env: { HARNESS_APM_COMMAND: join(root, 'fake-apm.mjs'), HARNESS_GROK_COMMAND: '/usr/bin/true' } };
 }
 
 test('clean fixture supports all targets through bootstrap, rebootstrap, and restore', async () => {
@@ -49,12 +51,12 @@ test('clean fixture supports all targets through bootstrap, rebootstrap, and res
     const first = await runHarness(['bootstrap', '--target', target, '--source', source], { root, env });
     assert.equal(first.code, 0, `${target}: ${first.stderr}`);
     const second = await runHarness(['bootstrap', '--target', target, '--source', source], { root, env });
-    assert.equal(second.code, 0, `${target} rebootstrap: ${second.stderr}`);
+    assert.equal(second.code, 0, `${target} rebootstrap: ${second.stdout} ${second.stderr}`);
     const configPath = { codex: '.codex/config.toml', claude: '.mcp.json', cursor: '.cursor/mcp.json', 'grok-build': '.grok/config.toml', antigravity: '.agents/mcp.json' }[target];
-    const config = await read(root, configPath);
-    assert.match(config, /docs\.mcp\.cloudflare\.com\/mcp/);
+    const config = target === 'antigravity' ? '' : await read(root, configPath);
+    if (target !== 'antigravity') assert.match(config, /docs\.mcp\.cloudflare\.com\/mcp/);
     const restored = await runHarness(['restore', '--target', target], { root, env });
-    assert.equal(restored.code, 0, `${target} restore: ${restored.stderr}`);
+    assert.equal(restored.code, 0, `${target} restore: ${restored.stdout} ${restored.stderr}`);
     assert.match(await read(root, '.codex/settings.json'), /policy/);
     await assert.rejects(() => read(root, configPath), /ENOENT/, `${target} generated config remained`);
   }
@@ -75,16 +77,16 @@ test('malformed generated configuration fails without a partial write', async ()
   const before = await read(root, '.codex/settings.json');
   const result = await runHarness(['bootstrap', '--target', 'codex', '--source', source], { root, env });
   assert.equal(result.code, 1);
-  assert.match(result.stdout, /conflict/);
+  assert.match(result.stdout, /invalid-config/);
   assert.equal(await read(root, '.codex/settings.json'), before);
 });
 
 test('restore detects a manual edit instead of deleting it', async () => {
   const { root, source, env } = await fixture();
   assert.equal((await runHarness(['bootstrap', '--target', 'codex', '--source', source], { root, env })).code, 0);
-  await write(root, '.codex/settings.json', JSON.stringify({ policy: { keep: true }, harness: { manual: true } }));
+  await write(root, '.codex/hooks.json', JSON.stringify({ hooks: { PreToolUse: [], manual: true } }));
   const result = await runHarness(['restore', '--target', 'codex'], { root, env });
   assert.equal(result.code, 1);
   assert.match(result.stdout, /conflict/);
-  assert.match(await read(root, '.codex/settings.json'), /manual/);
+  assert.match(await read(root, '.codex/hooks.json'), /manual/);
 });

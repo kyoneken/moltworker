@@ -14,3 +14,10 @@ test('unmanaged servers are preserved and same-name conflicts stop', () => {
   assert.equal(cloudflarePlan({ target: 'codex', existing }).servers.length, 0);
   assert.equal(cloudflarePlan({ target: 'codex', existing: { 'cloudflare-docs': { url: 'https://wrong.test/mcp' } } }).reason, 'conflict');
 });
+
+test('Antigravity remote MCP remains explicitly unsupported and malformed existing configuration stops', () => {
+  assert.deepEqual(cloudflarePlan({ target: 'antigravity' }), {
+    target: 'antigravity', status: 'skipped', reason: 'incompatible', servers: [],
+  });
+  assert.equal(cloudflarePlan({ target: 'codex', existing: null }).reason, 'invalid-config');
+});
