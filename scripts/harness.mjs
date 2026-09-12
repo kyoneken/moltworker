@@ -13,8 +13,11 @@ const COMMAND_OPTIONS = {
   doctor: new Set(['--target']),
 };
 
+const sourceAction = 'populate .harness/source/coding-agent-harness with the exact files in harness/source-lock.json via GitHub MCP, or use --source with a verified cache; see docs/harness-setup.md';
+const nextAction = (reason) => reason === 'ok' ? 'none' : reason === 'source-mismatch' ? sourceAction : reason === 'missing-command' ? 'install Python 3.11+ with tomllib on PATH or set HARNESS_PYTHON_COMMAND to its executable' : 'review harness configuration';
+
 function outputChecks(checks) { console.log(JSON.stringify(summarizeChecks(checks))); }
-function output(target, component, status, reason) { outputChecks([result(target, component, status, reason, reason === 'ok' ? 'none' : 'review harness configuration')]); }
+function output(target, component, status, reason) { outputChecks([result(target, component, status, reason, nextAction(reason))]); }
 function invalid(target = 'unknown') { output(target, 'config', 'fail', 'invalid-config'); process.exitCode = 1; }
 
 function parse(argv) {
@@ -67,10 +70,10 @@ async function main() {
   if (command === 'verify') {
     try {
       const { verified } = await loadSource(root, source);
-      const checks = [result(target, 'source', verified.ok ? 'pass' : 'fail', verified.ok ? 'ok' : verified.reason, verified.ok ? 'none' : 'review the pinned source')];
+      const checks = [result(target, 'source', verified.ok ? 'pass' : 'fail', verified.ok ? 'ok' : verified.reason, verified.ok ? 'none' : sourceAction)];
       if (verified.ok) {
         const installed = await verifyInstall({ root, target });
-        checks.push(result(target, 'config', installed.ok ? 'pass' : 'fail', installed.ok ? 'ok' : installed.reason, installed.ok ? 'none' : 'restore the recorded state or bootstrap again after reviewing changes'));
+        checks.push(result(target, 'config', installed.ok ? 'pass' : 'fail', installed.ok ? 'ok' : installed.reason, installed.ok ? 'none' : installed.reason === 'missing-command' ? nextAction(installed.reason) : 'restore the recorded state or bootstrap again after reviewing changes'));
       }
       outputChecks(checks);
       if (checks.some((check) => check.status === 'fail')) process.exitCode = 1;

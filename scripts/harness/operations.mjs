@@ -1,4 +1,4 @@
-import { spawnSync } from 'node:child_process';
+import { runPython } from './python.mjs';
 import { createHash } from 'node:crypto';
 
 const FORBIDDEN_POINTER_PARTS = new Set(['__proto__', 'constructor', 'prototype']);
@@ -143,10 +143,7 @@ function cleanCreatedParents(root, createdParents) {
 }
 
 function validateToml(text) {
-  const result = spawnSync('python3.11', ['-c', 'import sys,tomllib; tomllib.loads(sys.stdin.read())'], {
-    input: text, encoding: 'utf8', timeout: 5_000, maxBuffer: 64 * 1024,
-    stdio: ['pipe', 'ignore', 'ignore'],
-  });
+  const result = runPython('import sys,tomllib; tomllib.loads(sys.stdin.read())', text);
   if (result.error || result.status !== 0) fail('invalid-config');
 }
 
@@ -296,7 +293,7 @@ function applyFresh(files, operations) {
       const candidate = `${file.text}${blockPrefix}${core}\n`;
       if (operation.kind === 'toml-block') {
         validateToml(`${core}\n`);
-        try { validateToml(candidate); } catch { fail('conflict'); }
+        try { validateToml(candidate); } catch (error) { fail(error.message === 'missing-command' ? 'missing-command' : 'conflict'); }
       }
       file.text = candidate;
       entries.push(entryFor(operation, { blockPrefix, ...(createdFile ? { createdFile: true } : {}) }));

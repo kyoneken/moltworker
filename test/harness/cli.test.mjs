@@ -64,3 +64,25 @@ test('verify reports manual changes to an installed target', async () => {
   assert.equal(verify.code, 1);
   assert.match(verify.stdout, /conflict/);
 });
+
+test('missing Python is reported with an actionable dependency diagnostic', async () => {
+  const { root, env } = await fixture();
+  const output = await runHarness(['bootstrap', '--target', 'codex'], { root, env: { ...env, HARNESS_PYTHON_COMMAND: join(root, 'missing-python') } });
+  assert.equal(output.code, 1);
+  const check = JSON.parse(output.stdout).checks[0];
+  assert.equal(check.reason, 'missing-command');
+  assert.match(check.nextAction, /Python 3\.11/);
+  assert.doesNotMatch(output.stdout + output.stderr, /missing-python/);
+});
+
+test('missing source explains locked cache preparation for bootstrap and verify', async () => {
+  const { root, env } = await fixture();
+  for (const command of ['bootstrap', 'verify']) {
+    const output = await runHarness([command, '--target', 'codex', '--source', join(root, 'absent-source')], { root, env });
+    assert.equal(output.code, 1);
+    const check = JSON.parse(output.stdout).checks[0];
+    assert.equal(check.reason, 'source-mismatch');
+    assert.match(check.nextAction, /source-lock\.json/);
+    assert.match(check.nextAction, /GitHub MCP/);
+  }
+});

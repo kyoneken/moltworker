@@ -16,7 +16,7 @@ export function doctorChecks({ target, install } = {}) {
   const installCheck = install?.ok === true
     ? { status: 'pass', reason: 'ok', nextAction: 'none' }
     : install?.reason
-      ? { status: 'fail', reason: install.reason, nextAction: 'restore the recorded harness state or bootstrap again after reviewing changes' }
+      ? { status: 'fail', reason: install.reason, nextAction: install.reason === 'missing-command' ? 'install Python 3.11+ with tomllib on PATH or set HARNESS_PYTHON_COMMAND to its executable' : 'restore the recorded harness state or bootstrap again after reviewing changes' }
       : { status: 'not-verified', reason: 'live-check-not-run', nextAction: 'run the static installed-state check' };
   checks.push({ target, component: 'config', ...installCheck });
   checks.push({ target, component: 'client', status: 'not-verified', reason: 'live-check-not-run', nextAction: 'launch the selected client and confirm it loads the project configuration' });

@@ -1,7 +1,8 @@
+import { findPython, runPython } from './python.mjs';
 import { chmod, cp, lstat, mkdtemp, mkdir, readFile, readdir, rename, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
-import { spawn, spawnSync } from 'node:child_process';
+import { spawn } from 'node:child_process';
 import { loadState, saveState } from './state.mjs';
 import { applyOperations, restoreOperations } from './operations.mjs';
 import { onepasswordPlan } from './onepassword.mjs';
@@ -117,9 +118,7 @@ function stagedOnepasswordOperations(target, generatedFiles) {
   try {
     if (jsonMcpPath[target]) parsed = JSON.parse(generated.text).mcpServers;
     else {
-      const result = spawnSync('python3.11', ['-c', 'import sys,tomllib,json; print(json.dumps(tomllib.loads(sys.stdin.read()).get("mcp_servers", {})))'], {
-        input: generated.text, encoding: 'utf8', timeout: 5000, maxBuffer: 65536,
-      });
+      const result = runPython('import sys,tomllib,json; print(json.dumps(tomllib.loads(sys.stdin.read()).get("mcp_servers", {})))', generated.text);
       if (result.status !== 0) throw new Error('invalid-config');
       parsed = JSON.parse(result.stdout);
     }
@@ -149,6 +148,9 @@ function cloudflareOperations(target, profile, projectFiles, previousState) {
 
 export async function planInstall({ root, target, sourceDir, profile = 'base' }) {
   if (!TARGETS.includes(target) || !['base', 'observability'].includes(profile)) return { ok: false, reason: 'invalid-config' };
+  if (tomlMcpPath[target]) {
+    try { findPython(); } catch { return { ok: false, reason: 'missing-command' }; }
+  }
   const staging = await stage({ sourceDir, target });
   if (!staging) return { ok: false, reason: 'invalid-config' };
   try {
@@ -167,7 +169,7 @@ export async function planInstall({ root, target, sourceDir, profile = 'base' })
     const files = await projectFilesFor(root, [...operations, ...(state?.operations ?? [])]);
     applyOperations(files, operations, state ?? undefined);
     return { ok: true, root, target, operations };
-  } catch (error) { return { ok: false, reason: error?.message === 'conflict' ? 'conflict' : 'invalid-config' }; }
+  } catch (error) { return { ok: false, reason: ['conflict', 'missing-command'].includes(error?.message) ? error.message : 'invalid-config' }; }
   finally { await rm(staging, { recursive: true, force: true }); }
 }
 
@@ -203,7 +205,7 @@ async function writeTransaction(root, before, after) {
       if (old === undefined) await rm(join(root, path), { force: true });
       else await writeFile(join(root, path), old);
     } catch { residual.push(path); }
-    throw Object.assign(new Error(error?.message === 'conflict' ? 'conflict' : 'invalid-config'), { residual });
+    throw Object.assign(new Error(['conflict', 'missing-command'].includes(error?.message) ? error.message : 'invalid-config'), { residual });
   }
 }
 
@@ -217,7 +219,7 @@ export async function applyInstall(plan) {
     try { await saveState(plan.root, plan.target, applied.state); }
     catch (error) { await writeTransaction(plan.root, applied.files, before); return { ok: false, reason: 'invalid-config', residual: error?.residual ?? [] }; }
     return { ok: true };
-  } catch (error) { return { ok: false, reason: error?.message === 'conflict' ? 'conflict' : 'invalid-config', residual: error?.residual }; }
+  } catch (error) { return { ok: false, reason: ['conflict', 'missing-command'].includes(error?.message) ? error.message : 'invalid-config', residual: error?.residual }; }
 }
 
 export async function verifyInstall({ root, target }) {
@@ -227,7 +229,7 @@ export async function verifyInstall({ root, target }) {
     if (!state) return { ok: false, reason: 'invalid-config' };
     applyOperations(await projectFilesFor(root, state.operations), state.operations, state);
     return { ok: true };
-  } catch (error) { return { ok: false, reason: error?.message === 'conflict' ? 'conflict' : 'invalid-config' }; }
+  } catch (error) { return { ok: false, reason: ['conflict', 'missing-command'].includes(error?.message) ? error.message : 'invalid-config' }; }
 }
 
 export async function restoreInstall({ root, target }) {
@@ -241,5 +243,5 @@ export async function restoreInstall({ root, target }) {
     if (restored.state.operations.length === 0) await rm(join(root, '.harness/state', `${target}.json`), { force: true });
     else await saveState(root, target, restored.state);
     return { ok: true };
-  } catch (error) { return { ok: false, reason: error?.message === 'conflict' ? 'conflict' : 'invalid-config', residual: error?.residual }; }
+  } catch (error) { return { ok: false, reason: ['conflict', 'missing-command'].includes(error?.message) ? error.message : 'invalid-config', residual: error?.residual }; }
 }

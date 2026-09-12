@@ -61,3 +61,19 @@ npm run test:harness
 The tests do not contact 1Password, GitHub, Cloudflare, or any agent runtime.
 Live MCP handshakes remain a per-user acceptance step and are reported as
 `not-verified` until the selected client performs its own read check.
+
+## Python detection and a fresh checkout
+
+TOML operations probe `python3`, versioned Python 3.11–3.14 commands, then
+`python` for Python 3.11+ with `tomllib`. A command named `python3.11` is not
+required. Set `HARNESS_PYTHON_COMMAND` to an executable path if automatic
+selection is unsuitable; an invalid override fails explicitly. Missing Python
+is reported as `missing-command`, separately from invalid TOML.
+
+Checking out the PR does not include the private source cache. Before bootstrap,
+use GitHub MCP to retrieve exactly the files at the ref in `harness/source-lock.json`
+into `.harness/source/coding-agent-harness/`. A previously verified local cache
+may also be copied, or selected with `--source`; every file is verified again.
+Do not copy the source repository's `.git` directory or extra files. A missing
+or different cache reports `source-mismatch` and leaves project configuration
+unchanged. Bootstrap never silently downloads private source or bypasses hashes.
