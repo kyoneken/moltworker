@@ -1,6 +1,3 @@
-import { onepasswordPlan } from './onepassword.mjs';
-import { cloudflarePlan } from './cloudflare.mjs';
-
 const REASONS = new Set(['ok', 'missing-command', 'missing-tool', 'invalid-config', 'conflict', 'source-mismatch', 'authentication-failed', 'permission-denied', 'incompatible', 'user-action-required', 'live-check-not-run']);
 
 export function classifyCapability({ toolPresent = false, httpStatus, completed = false } = {}) {
@@ -16,19 +13,18 @@ export function doctorChecks({ target, install } = {}) {
   const installCheck = install?.ok === true
     ? { status: 'pass', reason: 'ok', nextAction: 'none' }
     : install?.reason
-      ? { status: 'fail', reason: install.reason, nextAction: install.reason === 'missing-command' ? 'install Python 3.11+ with tomllib on PATH or set HARNESS_PYTHON_COMMAND to its executable' : 'restore the recorded harness state or bootstrap again after reviewing changes' }
+      ? { status: 'fail', reason: install.reason, nextAction: 'follow the explicit APM setup steps in docs/harness-setup.md' }
       : { status: 'not-verified', reason: 'live-check-not-run', nextAction: 'run the static installed-state check' };
   checks.push({ target, component: 'config', ...installCheck });
   checks.push({ target, component: 'client', status: 'not-verified', reason: 'live-check-not-run', nextAction: 'launch the selected client and confirm it loads the project configuration' });
-  checks.push({ target, component: 'hooks', status: 'not-verified', reason: 'live-check-not-run', nextAction: 'run the target hook handshake from the client' });
+  checks.push({ target, component: 'hooks', status: target === 'grok-build' ? 'skipped' : 'not-verified', reason: target === 'grok-build' ? 'incompatible' : 'live-check-not-run', nextAction: target === 'grok-build' ? 'Grok Build has no verified native pre-tool hook target' : 'run the target hook handshake from the client' });
   for (const component of ['github-issues', 'github-projects']) checks.push({ target, component, status: 'not-verified', reason: 'live-check-not-run', nextAction: 'run the corresponding GitHub MCP read check from the connected agent' });
-  const onepassword = onepasswordPlan({ target });
-  checks.push({ target, component: 'onepassword', status: onepassword.status === 'pass' ? 'not-verified' : onepassword.status, reason: onepassword.status === 'pass' ? 'live-check-not-run' : onepassword.reason, nextAction: onepassword.status === 'pass' ? 'run the client check and approve Desktop access' : onepassword.nextAction });
-  const cloudflare = cloudflarePlan({ target });
-  const cloudflareStatus = cloudflare.status === 'pass' ? 'not-verified' : cloudflare.status;
-  const cloudflareReason = cloudflare.status === 'pass' ? 'live-check-not-run' : cloudflare.reason;
-  checks.push({ target, component: 'cloudflare-docs', status: cloudflareStatus, reason: cloudflareReason, nextAction: cloudflare.status === 'pass' ? 'run a read-only Docs MCP handshake from the client' : 'review the Cloudflare Docs MCP configuration' });
-  checks.push({ target, component: 'cloudflare-observability', status: cloudflareStatus, reason: cloudflareReason, nextAction: cloudflare.status === 'pass' ? 'authenticate and run a read-only Observability MCP handshake from the client' : 'review the Cloudflare Observability MCP configuration' });
+  const unsupportedMcp = target === 'antigravity';
+  const mcpStatus = unsupportedMcp ? 'skipped' : 'not-verified';
+  const mcpReason = unsupportedMcp ? 'incompatible' : 'live-check-not-run';
+  checks.push({ target, component: 'onepassword', status: mcpStatus, reason: mcpReason, nextAction: unsupportedMcp ? 'Antigravity has no verified project-local 1Password MCP schema' : 'run the client check and approve Desktop access' });
+  checks.push({ target, component: 'cloudflare-docs', status: mcpStatus, reason: mcpReason, nextAction: unsupportedMcp ? 'Antigravity has no verified project-local remote MCP schema' : 'run a read-only Docs MCP handshake from the client' });
+  checks.push({ target, component: 'cloudflare-observability', status: mcpStatus, reason: mcpReason, nextAction: unsupportedMcp ? 'Antigravity has no verified project-local remote MCP schema' : 'authenticate and run a read-only Observability MCP handshake from the client' });
   return checks;
 }
 

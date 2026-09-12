@@ -1,24 +1,24 @@
 import { readFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
-import { applyInstall, planInstall, restoreInstall, TARGETS, verifyInstall } from './harness/install.mjs';
+import { TARGETS } from './harness/targets.mjs';
 import { result, summarizeChecks } from './harness/report.mjs';
 import { verifySource } from './harness/source.mjs';
+import { verifyInstalled } from './harness/verify.mjs';
+import { adaptCursorHooks } from './harness/cursor.mjs';
 import { summarizeDoctor } from './harness/doctor.mjs';
 
 const DEFAULT_SOURCE = '.harness/source/coding-agent-harness';
 const COMMAND_OPTIONS = {
-  bootstrap: new Set(['--target', '--source', '--profile']),
-  restore: new Set(['--target']),
+  source: new Set(['--target', '--source']),
   verify: new Set(['--target', '--source']),
   doctor: new Set(['--target']),
+  adapt: new Set(['--target']),
 };
+const SETUP_ACTION = 'follow the explicit APM setup steps in docs/harness-setup.md';
 
-const sourceAction = 'populate .harness/source/coding-agent-harness with the exact files in harness/source-lock.json via GitHub MCP, or use --source with a verified cache; see docs/harness-setup.md';
-const nextAction = (reason) => reason === 'ok' ? 'none' : reason === 'source-mismatch' ? sourceAction : reason === 'missing-command' ? 'install Python 3.11+ with tomllib on PATH or set HARNESS_PYTHON_COMMAND to its executable' : 'review harness configuration';
-
-function outputChecks(checks) { console.log(JSON.stringify(summarizeChecks(checks))); }
-function output(target, component, status, reason) { outputChecks([result(target, component, status, reason, nextAction(reason))]); }
-function invalid(target = 'unknown') { output(target, 'config', 'fail', 'invalid-config'); process.exitCode = 1; }
+function print(checks) { console.log(JSON.stringify(summarizeChecks(checks))); }
+function report(target, component, status, reason, nextAction) { print([result(target, component, status, reason, nextAction)]); }
+function invalid() { report('unknown', 'config', 'fail', 'invalid-config', 'review harness command arguments'); process.exitCode = 1; }
 
 function parse(argv) {
   const [command, ...args] = argv;
@@ -31,61 +31,53 @@ function parse(argv) {
     if (!allowed.has(name) || Object.hasOwn(options, name) || !value || value.startsWith('--')) return null;
     options[name] = value;
   }
-  if (!options['--target'] || !TARGETS.includes(options['--target'])) return null;
-  if (command === 'bootstrap' && options['--profile'] && !['base', 'observability'].includes(options['--profile'])) return null;
-  return { command, target: options['--target'], source: options['--source'] ?? DEFAULT_SOURCE, profile: options['--profile'] ?? 'base' };
+  if (!TARGETS.includes(options['--target'])) return null;
+  return { command, target: options['--target'], source: options['--source'] ?? DEFAULT_SOURCE };
 }
 
-async function loadSource(root, source) {
+async function sourceCheck(root, source) {
   const lock = JSON.parse(await readFile(resolve(root, 'harness/source-lock.json'), 'utf8'));
-  const sourceDir = resolve(root, source);
-  return { sourceDir, verified: await verifySource(sourceDir, lock) };
+  return verifySource(resolve(root, source), lock);
 }
 
 async function main() {
   const parsed = parse(process.argv.slice(2));
   if (!parsed) return invalid();
-  const { command, target, source, profile } = parsed;
+  const { command, target, source } = parsed;
   const root = process.cwd();
-  if (command === 'bootstrap') {
-    try {
-      const { sourceDir, verified } = await loadSource(root, source);
-      if (!verified.ok) { output(target, 'source', 'fail', verified.reason); process.exitCode = 1; return; }
-      const planned = await planInstall({ root, target, sourceDir, profile });
-      if (planned.ok) planned.root = root;
-      const applied = await applyInstall(planned);
-      output(target, 'config', applied.ok ? 'pass' : 'fail', applied.ok ? 'ok' : applied.reason);
-      if (!applied.ok) process.exitCode = 1;
-    } catch { invalid(target); }
+  if (command === 'adapt') {
+    if (target !== 'cursor') { report(target, 'config', 'fail', 'incompatible', 'Cursor is the only target requiring the native adapter'); process.exitCode = 1; return; }
+    try { await adaptCursorHooks({ root }); report(target, 'hooks', 'pass', 'ok', 'none'); }
+    catch (error) { report(target, 'hooks', 'fail', error?.message === 'conflict' ? 'conflict' : 'invalid-config', SETUP_ACTION); process.exitCode = 1; }
     return;
   }
-  if (command === 'restore') {
+  if (command === 'source') {
     try {
-      const restored = await restoreInstall({ root, target });
-      output(target, 'config', restored.ok ? 'pass' : 'fail', restored.ok ? 'ok' : restored.reason);
-      if (!restored.ok) process.exitCode = 1;
-    } catch { invalid(target); }
+      const sourceResult = await sourceCheck(root, source);
+      report(target, 'source', sourceResult.ok ? 'pass' : 'fail', sourceResult.ok ? 'ok' : sourceResult.reason, sourceResult.ok ? 'none' : SETUP_ACTION);
+      if (!sourceResult.ok) process.exitCode = 1;
+    } catch { report(target, 'source', 'fail', 'invalid-config', SETUP_ACTION); process.exitCode = 1; }
     return;
   }
   if (command === 'verify') {
     try {
-      const { verified } = await loadSource(root, source);
-      const checks = [result(target, 'source', verified.ok ? 'pass' : 'fail', verified.ok ? 'ok' : verified.reason, verified.ok ? 'none' : sourceAction)];
-      if (verified.ok) {
-        const installed = await verifyInstall({ root, target });
-        checks.push(result(target, 'config', installed.ok ? 'pass' : 'fail', installed.ok ? 'ok' : installed.reason, installed.ok ? 'none' : installed.reason === 'missing-command' ? nextAction(installed.reason) : 'restore the recorded state or bootstrap again after reviewing changes'));
+      const sourceResult = await sourceCheck(root, source);
+      const checks = [result(target, 'source', sourceResult.ok ? 'pass' : 'fail', sourceResult.ok ? 'ok' : sourceResult.reason, sourceResult.ok ? 'none' : SETUP_ACTION)];
+      if (sourceResult.ok) {
+        const installed = await verifyInstalled({ root, target });
+        checks.push(result(target, 'config', installed.ok ? 'pass' : 'fail', installed.ok ? 'ok' : installed.reason, installed.ok ? 'none' : SETUP_ACTION));
       }
-      outputChecks(checks);
+      print(checks);
       if (checks.some((check) => check.status === 'fail')) process.exitCode = 1;
-    } catch { invalid(target); }
+    } catch { report(target, 'config', 'fail', 'invalid-config', SETUP_ACTION); process.exitCode = 1; }
     return;
   }
   try {
-    const install = await verifyInstall({ root, target });
-    const report = summarizeDoctor({ target, install });
-    console.log(JSON.stringify(report));
-    process.exitCode = report.ok ? 0 : 1;
-  } catch { invalid(target); }
+    const install = await verifyInstalled({ root, target });
+    const doctor = summarizeDoctor({ target, install });
+    console.log(JSON.stringify(doctor));
+    process.exitCode = doctor.ok ? 0 : 1;
+  } catch { report(target, 'config', 'fail', 'invalid-config', SETUP_ACTION); process.exitCode = 1; }
 }
 
-main().catch(() => invalid());
+main().catch(invalid);

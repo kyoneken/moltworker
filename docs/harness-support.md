@@ -9,9 +9,11 @@
 | Antigravity | `.agents/rules` | `.agents/skills` | `.agents/hooks.json` | incompatible | project-local integration unsupported |
 
 The table describes the target mapping, not a claim that every live runtime is
-installed on the current machine. `node scripts/harness.mjs doctor --target <target>` verifies recorded
-installation state while leaving native loading, authentication and live
-operations as `not-verified`. The connected-agent diagnostic skill separates
+installed on the current machine. The root `apm.yml` is the source of truth for
+the visible install; run APM with an explicit target, then use
+`node scripts/harness.mjs doctor --target <target>` to verify the generated files.
+The doctor leaves native loading, authentication and live operations as
+`not-verified`. The connected-agent diagnostic skill separates
 tool presence, authentication, permission, and completion. A successful config
 read does not imply that an MCP server was launched or that OAuth succeeded.
 
@@ -42,7 +44,10 @@ not establish live compatibility of the reviewed implementation.
 ## Native schema evidence
 
 Cursor uses project `.cursor/hooks.json`, lower-camel `preToolUse` and
-`beforeMCPExecution`, and flat command entries. MCP attribution uses
+`beforeMCPExecution`, and flat command entries. APM 0.29.0 emits the generic
+uppercase `PreToolUse` shape, so run
+`node scripts/harness.mjs adapt --target cursor` after APM install. The adapter
+preserves the APM data and adds the documented Cursor entries. MCP attribution uses
 `mcp_server_name`, not a server launch command. See the
 [official Cursor Hooks documentation](https://cursor.com/docs/hooks)
 (checked 2026-09-12). Adapter tests use synthetic documented events; they are

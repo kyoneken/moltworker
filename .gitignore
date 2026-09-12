@@ -66,6 +66,13 @@ test/e2e/.dev.vars
 .worktrees/
 .superpowers/
 .harness/
+apm_modules/
+.harness/compiled/
+.codex/config.toml
+.mcp.json
+.cursor/mcp.json
+.grok/config.toml
+.codex/hooks/coding-agent-harness/
 .codex/rules/secret-safety.md
 .agents/skills/subagent-driven-implementation/
 .agents/skills/onepassword-environments/

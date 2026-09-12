@@ -1,0 +1,306 @@
+lockfile_version: '1'
+generated_at: '2026-09-12T21:50:15.570418+00:00'
+apm_version: 0.29.0
+dependencies:
+- repo_url: _local/coding-agent-harness
+  name: coding-agent-harness
+  version: 0.1.0
+  package_type: apm_package
+  deployed_files:
+  - .agents/hooks/coding-agent-harness/scripts/secret-command-guard.sh
+  - .agents/rules/secret-safety.md
+  - .agents/skills/onepassword-environments
+  - .agents/skills/onepassword-environments/SKILL.md
+  - .agents/skills/subagent-driven-implementation
+  - .agents/skills/subagent-driven-implementation/SKILL.md
+  - .claude/hooks/coding-agent-harness/scripts/secret-command-guard.sh
+  - .claude/rules/secret-safety.md
+  - .claude/skills/onepassword-environments
+  - .claude/skills/onepassword-environments/SKILL.md
+  - .claude/skills/subagent-driven-implementation
+  - .claude/skills/subagent-driven-implementation/SKILL.md
+  - .codex/hooks/coding-agent-harness/scripts/secret-command-guard.sh
+  - .cursor/hooks/coding-agent-harness/scripts/secret-command-guard.sh
+  - .cursor/rules/secret-safety.mdc
+  - .grok/rules/secret-safety.instructions.md
+  - .grok/skills/onepassword-environments
+  - .grok/skills/onepassword-environments/SKILL.md
+  - .grok/skills/subagent-driven-implementation
+  - .grok/skills/subagent-driven-implementation/SKILL.md
+  deployed_file_hashes:
+    .agents/hooks/coding-agent-harness/scripts/secret-command-guard.sh: sha256:aba0159d6325638552e5c95898d584ba3a12b3f7ac5f10af197a3a07883744ce
+    .agents/rules/secret-safety.md: sha256:11692c37863c267317e8dc31551cf82c7a23a209cac5305d00873d8533a7188a
+    .agents/skills/onepassword-environments/SKILL.md: sha256:7b81e48866a359aa6eb937974b69a4007d2c6bd657d89ad77f86ac4a51d4021e
+    .agents/skills/subagent-driven-implementation/SKILL.md: sha256:576968a2247304d08240acde898dfb0bb1418e839e6408be99e162c7eff03692
+    .claude/hooks/coding-agent-harness/scripts/secret-command-guard.sh: sha256:aba0159d6325638552e5c95898d584ba3a12b3f7ac5f10af197a3a07883744ce
+    .claude/rules/secret-safety.md: sha256:64744bd7a2b59d1e6f3a1c1f4919121c21ec6711547042dec0b4f754c2ad78b8
+    .claude/skills/onepassword-environments/SKILL.md: sha256:7b81e48866a359aa6eb937974b69a4007d2c6bd657d89ad77f86ac4a51d4021e
+    .claude/skills/subagent-driven-implementation/SKILL.md: sha256:576968a2247304d08240acde898dfb0bb1418e839e6408be99e162c7eff03692
+    .codex/hooks/coding-agent-harness/scripts/secret-command-guard.sh: sha256:aba0159d6325638552e5c95898d584ba3a12b3f7ac5f10af197a3a07883744ce
+    .cursor/hooks/coding-agent-harness/scripts/secret-command-guard.sh: sha256:aba0159d6325638552e5c95898d584ba3a12b3f7ac5f10af197a3a07883744ce
+    .cursor/rules/secret-safety.mdc: sha256:1b5a664fa45a70bf4fa8bad07aedc354d5eac04ab9df19174232623568cab880
+    .grok/rules/secret-safety.instructions.md: sha256:08585fbfc982a79d60a54358aa24e08111e00d8d4e86b4bb50b139f9020c3b6e
+    .grok/skills/onepassword-environments/SKILL.md: sha256:7b81e48866a359aa6eb937974b69a4007d2c6bd657d89ad77f86ac4a51d4021e
+    .grok/skills/subagent-driven-implementation/SKILL.md: sha256:576968a2247304d08240acde898dfb0bb1418e839e6408be99e162c7eff03692
+  source: local
+  local_path: ./.harness/source/coding-agent-harness
+  declared_license: UNLICENSED
+deployments:
+- kind: project-relative
+  target: antigravity
+  value: .agents/rules/secret-safety.md
+  runtime: null
+  scope: project
+  owners:
+  - ./.harness/source/coding-agent-harness
+  active_owner: ./.harness/source/coding-agent-harness
+  content_hash: sha256:11692c37863c267317e8dc31551cf82c7a23a209cac5305d00873d8533a7188a
+- kind: project-relative
+  target: antigravity
+  value: .agents/skills/onepassword-environments
+  runtime: null
+  scope: project
+  owners:
+  - ./.harness/source/coding-agent-harness
+  active_owner: ./.harness/source/coding-agent-harness
+  content_hash: null
+- kind: project-relative
+  target: antigravity
+  value: .agents/skills/onepassword-environments/SKILL.md
+  runtime: null
+  scope: project
+  owners:
+  - ./.harness/source/coding-agent-harness
+  active_owner: ./.harness/source/coding-agent-harness
+  content_hash: sha256:7b81e48866a359aa6eb937974b69a4007d2c6bd657d89ad77f86ac4a51d4021e
+- kind: project-relative
+  target: antigravity
+  value: .agents/skills/subagent-driven-implementation
+  runtime: null
+  scope: project
+  owners:
+  - ./.harness/source/coding-agent-harness
+  active_owner: ./.harness/source/coding-agent-harness
+  content_hash: null
+- kind: project-relative
+  target: antigravity
+  value: .agents/skills/subagent-driven-implementation/SKILL.md
+  runtime: null
+  scope: project
+  owners:
+  - ./.harness/source/coding-agent-harness
+  active_owner: ./.harness/source/coding-agent-harness
+  content_hash: sha256:576968a2247304d08240acde898dfb0bb1418e839e6408be99e162c7eff03692
+- kind: project-relative
+  target: claude
+  value: .claude/hooks/coding-agent-harness/scripts/secret-command-guard.sh
+  runtime: null
+  scope: project
+  owners:
+  - ./.harness/source/coding-agent-harness
+  active_owner: ./.harness/source/coding-agent-harness
+  content_hash: sha256:aba0159d6325638552e5c95898d584ba3a12b3f7ac5f10af197a3a07883744ce
+- kind: project-relative
+  target: claude
+  value: .claude/rules/secret-safety.md
+  runtime: null
+  scope: project
+  owners:
+  - ./.harness/source/coding-agent-harness
+  active_owner: ./.harness/source/coding-agent-harness
+  content_hash: sha256:64744bd7a2b59d1e6f3a1c1f4919121c21ec6711547042dec0b4f754c2ad78b8
+- kind: project-relative
+  target: claude
+  value: .claude/skills/onepassword-environments
+  runtime: null
+  scope: project
+  owners:
+  - ./.harness/source/coding-agent-harness
+  active_owner: ./.harness/source/coding-agent-harness
+  content_hash: null
+- kind: project-relative
+  target: claude
+  value: .claude/skills/onepassword-environments/SKILL.md
+  runtime: null
+  scope: project
+  owners:
+  - ./.harness/source/coding-agent-harness
+  active_owner: ./.harness/source/coding-agent-harness
+  content_hash: sha256:7b81e48866a359aa6eb937974b69a4007d2c6bd657d89ad77f86ac4a51d4021e
+- kind: project-relative
+  target: claude
+  value: .claude/skills/subagent-driven-implementation
+  runtime: null
+  scope: project
+  owners:
+  - ./.harness/source/coding-agent-harness
+  active_owner: ./.harness/source/coding-agent-harness
+  content_hash: null
+- kind: project-relative
+  target: claude
+  value: .claude/skills/subagent-driven-implementation/SKILL.md
+  runtime: null
+  scope: project
+  owners:
+  - ./.harness/source/coding-agent-harness
+  active_owner: ./.harness/source/coding-agent-harness
+  content_hash: sha256:576968a2247304d08240acde898dfb0bb1418e839e6408be99e162c7eff03692
+- kind: project-relative
+  target: codex
+  value: .codex/hooks/coding-agent-harness/scripts/secret-command-guard.sh
+  runtime: null
+  scope: project
+  owners:
+  - ./.harness/source/coding-agent-harness
+  active_owner: ./.harness/source/coding-agent-harness
+  content_hash: sha256:aba0159d6325638552e5c95898d584ba3a12b3f7ac5f10af197a3a07883744ce
+- kind: project-relative
+  target: cursor
+  value: .cursor/hooks/coding-agent-harness/scripts/secret-command-guard.sh
+  runtime: null
+  scope: project
+  owners:
+  - ./.harness/source/coding-agent-harness
+  active_owner: ./.harness/source/coding-agent-harness
+  content_hash: sha256:aba0159d6325638552e5c95898d584ba3a12b3f7ac5f10af197a3a07883744ce
+- kind: project-relative
+  target: cursor
+  value: .cursor/rules/secret-safety.mdc
+  runtime: null
+  scope: project
+  owners:
+  - ./.harness/source/coding-agent-harness
+  active_owner: ./.harness/source/coding-agent-harness
+  content_hash: sha256:1b5a664fa45a70bf4fa8bad07aedc354d5eac04ab9df19174232623568cab880
+- kind: project-relative
+  target: grok-build
+  value: .grok/rules/secret-safety.instructions.md
+  runtime: null
+  scope: project
+  owners:
+  - ./.harness/source/coding-agent-harness
+  active_owner: ./.harness/source/coding-agent-harness
+  content_hash: sha256:08585fbfc982a79d60a54358aa24e08111e00d8d4e86b4bb50b139f9020c3b6e
+- kind: project-relative
+  target: grok-build
+  value: .grok/skills/onepassword-environments
+  runtime: null
+  scope: project
+  owners:
+  - ./.harness/source/coding-agent-harness
+  active_owner: ./.harness/source/coding-agent-harness
+  content_hash: null
+- kind: project-relative
+  target: grok-build
+  value: .grok/skills/onepassword-environments/SKILL.md
+  runtime: null
+  scope: project
+  owners:
+  - ./.harness/source/coding-agent-harness
+  active_owner: ./.harness/source/coding-agent-harness
+  content_hash: sha256:7b81e48866a359aa6eb937974b69a4007d2c6bd657d89ad77f86ac4a51d4021e
+- kind: project-relative
+  target: grok-build
+  value: .grok/skills/subagent-driven-implementation
+  runtime: null
+  scope: project
+  owners:
+  - ./.harness/source/coding-agent-harness
+  active_owner: ./.harness/source/coding-agent-harness
+  content_hash: null
+- kind: project-relative
+  target: grok-build
+  value: .grok/skills/subagent-driven-implementation/SKILL.md
+  runtime: null
+  scope: project
+  owners:
+  - ./.harness/source/coding-agent-harness
+  active_owner: ./.harness/source/coding-agent-harness
+  content_hash: sha256:576968a2247304d08240acde898dfb0bb1418e839e6408be99e162c7eff03692
+- kind: project-relative
+  target: legacy
+  value: .agents/hooks/coding-agent-harness/scripts/secret-command-guard.sh
+  runtime: null
+  scope: project
+  owners:
+  - ./.harness/source/coding-agent-harness
+  active_owner: ./.harness/source/coding-agent-harness
+  content_hash: sha256:aba0159d6325638552e5c95898d584ba3a12b3f7ac5f10af197a3a07883744ce
+- kind: uri
+  target: mcp
+  value: 1password
+  runtime: claude
+  scope: project
+  owners:
+  - .
+  active_owner: .
+  content_hash: null
+- kind: uri
+  target: mcp
+  value: cloudflare-docs
+  runtime: claude
+  scope: project
+  owners:
+  - .
+  active_owner: .
+  content_hash: null
+- kind: uri
+  target: mcp
+  value: 1password
+  runtime: codex
+  scope: project
+  owners:
+  - .
+  active_owner: .
+  content_hash: null
+- kind: uri
+  target: mcp
+  value: cloudflare-docs
+  runtime: codex
+  scope: project
+  owners:
+  - .
+  active_owner: .
+  content_hash: null
+- kind: uri
+  target: mcp
+  value: 1password
+  runtime: cursor
+  scope: project
+  owners:
+  - .
+  active_owner: .
+  content_hash: null
+- kind: uri
+  target: mcp
+  value: cloudflare-docs
+  runtime: cursor
+  scope: project
+  owners:
+  - .
+  active_owner: .
+  content_hash: null
+mcp_servers:
+- 1password
+- cloudflare-docs
+mcp_configs:
+  1password:
+    name: 1password
+    transport: stdio
+    registry: false
+    command: 1password-mcp
+  cloudflare-docs:
+    name: cloudflare-docs
+    transport: streamable-http
+    registry: false
+    url: https://docs.mcp.cloudflare.com/mcp
+mcp_target_servers:
+  claude:
+  - 1password
+  - cloudflare-docs
+  codex:
+  - 1password
+  - cloudflare-docs
+  cursor:
+  - 1password
+  - cloudflare-docs

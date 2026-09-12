@@ -1,6 +1,6 @@
 ---
 name: harness-setup
-description: Safely retrieve and install the fixed coding-agent harness source.
+description: Safely retrieve the fixed source and install the visible APM harness.
 ---
 
 # Harness setup
@@ -12,15 +12,21 @@ or an APM remote dependency to retrieve the source.
 Before materializing a file, reject an absolute path, `..` path segment,
 symlink, or submodule. Write the MCP-fetched files only below
 `.harness/source/coding-agent-harness`, calculate SHA-256 for each result, and
-compare it with the lock before bootstrap. Stop when the GitHub MCP connection
+compare it with the lock before APM install. Stop when the GitHub MCP connection
 is unavailable or a file cannot be verified; do not substitute another ref.
 
-Run `node scripts/harness.mjs bootstrap --target <one-target> --source
-.harness/source/coding-agent-harness` only after all hashes match. The wrapper
-uses a temporary local APM project and does not run APM in the repository root.
-Review the structured result; it records configuration generation separately
-from native-client loading and any live authentication check.
+Run `node scripts/harness.mjs source --target <one-target>` only after all
+hashes match. Then run the root APM commands shown in `docs/harness-setup.md`:
+`apm install --only apm --target <target> --frozen`, followed by
+`apm install --only mcp --target <target> --frozen` for Codex, Claude, and
+Cursor. Run `apm compile --target <target> --root .harness/compiled/<target>`
+to keep generated instruction context separate from an existing `AGENTS.md`.
+Run the Cursor adapter after its APM install; use the native Grok MCP commands,
+and skip remote MCP for Antigravity. APM is intentionally visible in the
+repository's root `apm.yml`; do not hide it behind another wrapper.
 
-Use `verify` for the static source check, `doctor --json` for a
-non-live report, and `restore` only after reviewing a clean result. Restore
-stops if a managed value or block has changed since installation.
+Use `node scripts/harness.mjs verify --target <target>` for a read-only check
+of the locked source and native files, and `doctor --target <target>` for the
+non-live report. APM owns installation and cleanup; review its dry-run output
+before removing generated files. Never delete or overwrite an existing native
+configuration to resolve a collision.

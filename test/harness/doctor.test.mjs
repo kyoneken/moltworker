@@ -12,10 +12,10 @@ test('classifies tool, auth, permission and completion independently', () => {
 });
 
 test('static doctor keeps installation, live capabilities, and integrations separate', () => {
-  const report = summarizeDoctor({ target: 'codex', commands: { codex: true } });
+  const report = summarizeDoctor({ target: 'codex', install: { ok: true } });
   assert.equal(report.schemaVersion, 1);
   assert.deepEqual(report.checks.map((check) => check.component), ['config', 'client', 'hooks', 'github-issues', 'github-projects', 'onepassword', 'cloudflare-docs', 'cloudflare-observability']);
-  assert.equal(report.checks[0].status, 'not-verified');
+  assert.equal(report.checks[0].status, 'pass');
   for (const check of report.checks.slice(1)) assert.equal(check.reason, 'live-check-not-run');
 });
 
@@ -23,10 +23,8 @@ test('doctor reports unsupported integrations separately', () => {
   const report = summarizeDoctor({ target: 'antigravity', install: { ok: true } });
   const onepassword = report.checks.find((check) => check.component === 'onepassword');
   const cloudflare = report.checks.find((check) => check.component === 'cloudflare-docs');
-  assert.deepEqual(onepassword, {
-    target: 'antigravity', component: 'onepassword', status: 'skipped', reason: 'incompatible',
-    nextAction: 'use a supported client for 1Password MCP',
-  });
+  assert.equal(onepassword.status, 'skipped');
+  assert.equal(onepassword.reason, 'incompatible');
   assert.equal(cloudflare.status, 'skipped');
   assert.equal(cloudflare.reason, 'incompatible');
 });

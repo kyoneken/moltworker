@@ -154,7 +154,7 @@ npm run typecheck     # TypeScript check
 ### Multi-agent harness
 
 See [the user acceptance checklist](docs/harness-acceptance.md) for per-client
-loading, Hook trust, Desktop approval, MCP connection, and restore checks.
+loading, Hook trust, Desktop approval, MCP connection, and cleanup checks.
 
 The project-scoped harness is installed from the fixed source revision recorded
 in `harness/source-lock.json`. It is intentionally run against one agent target
@@ -162,17 +162,20 @@ at a time so an existing target configuration can be reviewed before changes
 are applied:
 
 ```bash
-node scripts/harness.mjs bootstrap --target codex --source /path/to/coding-agent-harness
-node scripts/harness.mjs verify --target codex --source .harness/source/coding-agent-harness
+node scripts/harness.mjs source --target codex
+apm install --only apm --target codex --frozen
+apm install --only mcp --target codex --frozen
+apm compile --target codex --root .harness/compiled/codex
+node scripts/harness.mjs verify --target codex
 node scripts/harness.mjs doctor --target codex
-node scripts/harness.mjs restore --target codex
 ```
 
 The source directory is private and source-derived output is ignored by Git.
-Bootstrap verifies every locked file before staging it. The harness owns only
-the generated deltas it records under `.harness/state/`; a manual edit causes a
-restore conflict instead of silently deleting user data. Use the
-`harness-setup` skill for 1Password MCP and Cloudflare MCP onboarding, and
+The root `apm.yml` keeps the install inputs visible; APM owns generated files
+and cleanup. Cursor additionally runs `node scripts/harness.mjs adapt --target
+cursor`, Grok Build uses its native `grok mcp add --scope project` commands,
+and Antigravity skips project-local remote MCP. Use the `harness-setup` skill
+for source retrieval and target-specific MCP onboarding, and
 `harness-doctor` for GitHub MCP diagnostics. Never place credentials in tracked
 files or MCP arguments.
 
