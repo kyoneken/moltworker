@@ -176,7 +176,7 @@ Git. The root `apm.yml` keeps the install inputs visible; APM owns generated
 files and cleanup. Cursor additionally runs `node scripts/harness.mjs adapt --target
 cursor`, Grok Build uses its native `grok mcp add --scope project` commands,
 and Antigravity skips project-local remote MCP. Use the `harness-setup` skill
-for source retrieval and target-specific MCP onboarding, and
+for source verification and target-specific MCP onboarding, and
 `harness-doctor` for GitHub MCP diagnostics. Never place credentials in tracked
 files or MCP arguments.
 
