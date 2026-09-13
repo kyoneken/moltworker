@@ -18,6 +18,16 @@
             "statusMessage": "Checking the upstream read-only boundary"
           }
         ]
+      },
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "sh .codex/hooks/coding-agent-harness/scripts/secret-command-guard.sh",
+            "timeout": 5
+          }
+        ]
       }
     ]
   }
