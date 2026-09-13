@@ -2,6 +2,9 @@ import { createHash } from 'node:crypto';
 import { lstat, readFile, readdir } from 'node:fs/promises';
 import { isAbsolute, join, normalize, relative } from 'node:path';
 
+const LOCKED_REPOSITORY = 'kyoneken/coding-agent-harness';
+const LOCKED_APM_VERSION = '0.29.0';
+
 function safeRelativePath(path) {
   return typeof path === 'string' && path.length > 0 && !isAbsolute(path) && !normalize(path).startsWith('..') && relative('.', path) === path;
 }
@@ -24,7 +27,7 @@ async function filesBelow(root, prefix = '') {
 }
 
 export async function verifySource(sourceDir, lock) {
-  if (!lock || lock.schemaVersion !== 1 || !Array.isArray(lock.files) || lock.files.length === 0 || !/^[0-9a-f]{40}$/.test(lock.ref ?? '')) {
+  if (!lock || lock.schemaVersion !== 1 || lock.repository !== LOCKED_REPOSITORY || lock.apmVersion !== LOCKED_APM_VERSION || !Array.isArray(lock.files) || lock.files.length === 0 || !/^[0-9a-f]{40}$/.test(lock.ref ?? '')) {
     return { ok: false, reason: 'invalid-config' };
   }
   const paths = new Set();
