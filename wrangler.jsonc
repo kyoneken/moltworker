@@ -15,9 +15,6 @@
   "observability": {
     "enabled": true,
   },
-  "triggers": {
-    "crons": ["0 */6 * * *"],
-  },
   // Static assets for admin UI (built by vite)
   "assets": {
     "directory": "./dist/client",
