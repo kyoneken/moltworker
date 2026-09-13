@@ -15,8 +15,10 @@
   "observability": {
     "enabled": true,
   },
+  // Empty crons replaces previously deployed schedules. Omitting `triggers`
+  // leaves existing Cron Triggers in place.
   "triggers": {
-    "crons": ["0 */6 * * *"],
+    "crons": [],
   },
   // Static assets for admin UI (built by vite)
   "assets": {

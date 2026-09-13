@@ -21,7 +21,7 @@
  */
 
 import { Hono } from 'hono';
-import { getSandbox, Sandbox, type SandboxOptions } from '@cloudflare/sandbox';
+import { getSandbox, Sandbox as BaseSandbox, type SandboxOptions } from '@cloudflare/sandbox';
 
 import type { AppEnv, OpenClawEnv } from './types';
 import { GATEWAY_PORT } from './config';
@@ -41,6 +41,7 @@ import {
 import { redactSensitiveParams } from './utils/logging';
 import { withProxyAttribution } from './utils/proxy-headers';
 import { handleScheduled } from './cron/handler';
+import { createSnapshot, recordBackupError } from './persistence';
 import loadingPageHtml from './assets/loading.html';
 import configErrorHtml from './assets/config-error.html';
 
@@ -71,7 +72,21 @@ function isGatewayCrashedError(error: unknown): boolean {
 
 // killGateway is imported from './gateway' (shared with restart handler)
 
-export { Sandbox };
+export class Sandbox extends BaseSandbox<OpenClawEnv> {
+  override async onActivityExpired(): Promise<void> {
+    try {
+      if (this.env.BACKUP_BUCKET) {
+        const result = await createSnapshot(this, this.env.BACKUP_BUCKET, 'idle');
+        if (result.skipped) console.log('[persistence] Idle snapshot skipped; fingerprint unchanged');
+        else console.log(`[persistence] Idle snapshot created ${result.id}`);
+      }
+    } catch {
+      await recordBackupError(this.env.BACKUP_BUCKET, 'idle-snapshot-failed').catch(() => undefined);
+      console.warn('[persistence] Idle snapshot failed; continuing shutdown');
+    }
+    await super.onActivityExpired();
+  }
+}
 
 /**
  * Validate required environment variables.

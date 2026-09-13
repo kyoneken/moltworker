@@ -289,12 +289,16 @@ R2 storage uses a backup/restore approach for simplicity:
 - OpenClaw uses its default paths (no special configuration needed)
 
 **During operation:**
-- The Worker creates a Sandbox SDK snapshot through `BACKUP_BUCKET`
+- The Sandbox creates a snapshot of `/home/openclaw` when an inactive session is
+  about to sleep; this does not require a Workers Cron wake
 - You can trigger a manual backup from the admin UI at `/_admin/`
 
 **In the admin UI:**
 - Click "Backup Now" to create an immediate snapshot
 - History lists retained generations. History count is not the number of SDK-restorable copies; TTL is 7 days and expired snapshots are not restorable via the app path even if R2 objects remain
+- The SDK snapshot TTL is 7 days. If the deployment is unused for more than 7
+  days, the next cold start may report `expired-continue`; use **Backup Now**
+  during an active session when needed
 - 事前検証 checks UUID/metadata/TTL/size/etag only. A restore drill is a separate isolated restore that checks paired devices, sessions, and a workspace file. See `docs/backup-restore-drill.md`
 - 復元予約 selects a generation; Recreate consumes it. That is not "restore complete" until cold restore succeeds
 

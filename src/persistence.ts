@@ -20,7 +20,7 @@ const BACKUP_OPERATION_TIMEOUT_MS = 10_000;
 const RESTORE_NEEDED_KEY = 'restore-needed';
 
 export type BackupHealth = 'valid' | 'near-expiry' | 'expired' | 'missing' | 'corrupt' | 'none';
-export type BackupSource = 'manual' | 'cron' | 'migrated';
+export type BackupSource = 'manual' | 'cron' | 'idle' | 'migrated';
 export type BackupVerification = 'stored-etag' | 'legacy';
 export type RestoreOutcomeKind = 'restored' | 'expired-continue' | 'missing-continue';
 
@@ -835,7 +835,7 @@ export async function createSnapshot(
 ): Promise<{ id: string; dir: string; skipped?: boolean }> {
   return withBackupOperationLease(bucket, async (lease) =>
     createSnapshotUnderLease(sandbox, bucket, lease, source, {
-      skipUnchanged: source === 'cron',
+      skipUnchanged: source === 'cron' || source === 'idle',
     }),
   );
 }

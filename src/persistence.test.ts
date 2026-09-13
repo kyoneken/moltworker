@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { Sandbox } from '@cloudflare/sandbox';
-import { createMockExecResult } from './test-utils';
+import { createMockExecResult, createMockR2ObjectBody } from './test-utils';
 import {
   clearPersistenceCache,
   classifyBackupHealth,
@@ -374,6 +374,72 @@ function backupBucket(
 }
 
 describe('createSnapshot', () => {
+  it('skips an unchanged idle snapshot while the current backup has ample TTL', async () => {
+    const fingerprintSource = 'unchanged-workspace';
+    const digest = await crypto.subtle.digest(
+      'SHA-256',
+      new TextEncoder().encode(fingerprintSource),
+    );
+    const fingerprint = [...new Uint8Array(digest)]
+      .map((byte) => byte.toString(16).padStart(2, '0'))
+      .join('');
+    const id = '11111111-1111-4111-8111-111111111111';
+    const manifest = {
+      version: 1 as const,
+      retention: 5,
+      currentId: id,
+      pendingRestoreId: null,
+      lastLiveId: id,
+      lastSkipAt: null,
+      lastError: null,
+      lastRestoreOutcome: null,
+      generations: [
+        {
+          id,
+          dir: '/home/openclaw',
+          createdAt: new Date().toISOString(),
+          ttl: 604800,
+          sizeBytes: 1,
+          archiveEtag: null,
+          source: 'manual' as const,
+          verification: 'legacy' as const,
+          fingerprint,
+        },
+      ],
+    };
+    let lock: R2Object | null = null;
+    let version = 0;
+    const bucket = {
+      get: vi.fn().mockImplementation(async (key: string) => {
+        if (key === 'backup-manifest.json') return createMockR2ObjectBody(manifest, { etag: 'manifest' });
+        if (key === 'backup-handle.json')
+          return createMockR2ObjectBody({ id, dir: '/home/openclaw' }, { etag: 'handle' });
+        return null;
+      }),
+      head: vi.fn().mockImplementation(async (key: string) =>
+        key === 'backup-operation-lock' ? lock : null,
+      ),
+      put: vi.fn().mockImplementation(async (key: string) => {
+        if (key === 'backup-operation-lock') {
+          version += 1;
+          lock = { etag: `lock-${version}` } as R2Object;
+          return lock;
+        }
+        return { etag: `${key}-etag` } as R2Object;
+      }),
+    } as unknown as R2Bucket;
+    const sandbox = {
+      exec: vi.fn().mockResolvedValue(createMockExecResult(fingerprintSource)),
+      createBackup: vi.fn(),
+    } as unknown as Sandbox;
+
+    await expect(createSnapshot(sandbox, bucket, 'idle')).resolves.toMatchObject({
+      id,
+      skipped: true,
+    });
+    expect(sandbox.createBackup).not.toHaveBeenCalled();
+  });
+
   it('holds the shared backup-operation lease through handle replacement and old cleanup', async () => {
     const events: string[] = [];
     let lock: R2Object | null = null;
