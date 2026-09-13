@@ -42,6 +42,25 @@ grok mcp add --scope project cloudflare-docs https://docs.mcp.cloudflare.com/mcp
 node scripts/harness.mjs verify --target grok-build
 ```
 
+Grok Buildの設定・接続をまとめて確認する場合は、次を実行します。
+`grok mcp add` は初回登録時だけ実行し、既存のproject設定がある場合は
+重複登録せず `grok mcp list` と `grok mcp doctor` を実行してください。
+
+```sh
+set -eu
+node scripts/harness.mjs source --target grok-build
+node scripts/harness.mjs verify --target grok-build
+node scripts/harness.mjs doctor --target grok-build
+grok mcp list --json
+grok mcp doctor --json
+```
+
+`grok mcp list --json` に `1password (project)` と
+`cloudflare-docs (project)` が含まれ、`grok mcp doctor --json` の両方が
+接続可能として報告されれば合格です。1Passwordの初回診断ではDesktopの
+Environment承認が求められることがあります。出力には認証情報や秘密値を
+貼り付けないでください。
+
 AntigravityはAPMのskills/Hookだけを導入します。
 
 ```sh
