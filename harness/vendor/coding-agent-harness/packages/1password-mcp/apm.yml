@@ -1,0 +1,14 @@
+name: coding-agent-harness-1password-mcp
+version: "0.1.0"
+description: Cross-target local 1Password Environments MCP integration.
+author: kyoneken
+license: UNLICENSED
+targets: [codex, claude, cursor]
+includes: []
+dependencies:
+  apm: []
+  mcp:
+    - name: 1password
+      registry: false
+      transport: stdio
+      command: 1password-mcp

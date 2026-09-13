@@ -1,0 +1,16 @@
+name: coding-agent-harness
+version: "0.1.0"
+description: Project-scoped coding-agent harness primitives.
+author: kyoneken
+license: UNLICENSED
+targets: [codex, antigravity, grok-build, claude, cursor]
+includes:
+  - .apm/instructions/
+  - .apm/skills/
+  - .apm/hooks/
+scripts:
+  bootstrap: ./scripts/bootstrap
+  verify: ./scripts/verify
+dependencies:
+  apm: []
+  mcp: []

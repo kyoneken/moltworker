@@ -142,6 +142,7 @@ stdout.toLowerCase().includes('approved')
 
 ```bash
 npm test              # Run tests (vitest)
+npm run test:harness   # Test the multi-agent harness with synthetic fixtures
 npm run test:watch    # Run tests in watch mode
 npm run build         # Build worker + client
 npm run deploy        # Build and deploy to Cloudflare
@@ -149,6 +150,36 @@ npm run dev           # Vite dev server
 npm run start         # wrangler dev (local worker)
 npm run typecheck     # TypeScript check
 ```
+
+### Multi-agent harness
+
+See the [harness setup guide](docs/harness-setup.md) and [user acceptance
+checklist](docs/harness-acceptance.md) for per-client loading, Hook trust,
+Desktop approval, MCP connection, and cleanup checks.
+
+The project-scoped harness is installed from the fixed source revision recorded
+in `harness/source-lock.json`. It is intentionally run against one agent target
+at a time so an existing target configuration can be reviewed before changes
+are applied:
+
+```bash
+node scripts/harness.mjs source --target codex
+apm install --only apm --target codex --frozen
+apm install --only mcp --target codex --frozen
+apm compile --target codex --root .harness/compiled/codex
+node scripts/harness.mjs verify --target codex
+node scripts/harness.mjs doctor --target codex
+```
+
+The source files are vendored under `harness/vendor/coding-agent-harness` and
+verified against `harness/source-lock.json`; generated output is ignored by
+Git. The root `apm.yml` keeps the install inputs visible; APM owns generated
+files and cleanup. Cursor additionally runs `node scripts/harness.mjs adapt --target
+cursor`, Grok Build uses its native `grok mcp add --scope project` commands,
+and Antigravity skips project-local remote MCP. Use the `harness-setup` skill
+for source verification and target-specific MCP onboarding, and
+`harness-doctor` for GitHub MCP diagnostics. Never place credentials in tracked
+files or MCP arguments.
 
 ## Testing
 

@@ -1,0 +1,19 @@
+# APM 0.29.0. Run from this directory; see docs/harness-setup.md.
+name: moltworker-harness
+version: "0.1.0"
+targets: [codex, claude, cursor, grok-build, antigravity]
+includes: []
+dependencies:
+  apm:
+    # The locked source is vendored so a fresh clone is immediately installable.
+    - path: './harness/vendor/coding-agent-harness'
+  mcp:
+    # These register servers; they do not install executables or authenticate.
+    - name: 1password
+      registry: false
+      transport: stdio
+      command: 1password-mcp
+    - name: cloudflare-docs
+      registry: false
+      transport: streamable-http
+      url: https://docs.mcp.cloudflare.com/mcp
