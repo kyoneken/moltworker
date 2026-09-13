@@ -8,7 +8,7 @@ describe('wrangler configuration', () => {
   it('does not configure a backup or wake cron', () => {
     const wranglerConfig = readFileSync(wranglerConfigPath, 'utf8');
 
-    expect(wranglerConfig).not.toMatch(/"crons"\s*:/);
+    expect(wranglerConfig).toMatch(/"crons"\s*:\s*\[\s*\]/);
     expect(wranglerConfig).not.toContain('0 */6 * * *');
     expect(wranglerConfig).not.toMatch(/\* \* \* \* \*/);
   });
