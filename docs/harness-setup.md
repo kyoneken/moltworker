@@ -1,9 +1,9 @@
 # Multi-agent harness setup
 
 The repository exposes its harness through APM. The root `apm.yml` declares
-the local harness source and the base MCP servers, so the install and compile
-steps are visible and reviewable. APM writes only project-scoped files; it does
-not copy a personal profile or retrieve the private source automatically.
+the vendored, hash-locked harness source and the base MCP servers, so a fresh
+clone has every install input. APM writes only project-scoped files; it does
+not copy a personal profile or retrieve credentials.
 
 ## Prerequisites
 
@@ -16,9 +16,8 @@ Desktop approval, and per-client evidence.
 ## Install from the locked source
 
 The source revision and file hashes are recorded in
-[`harness/source-lock.json`](../harness/source-lock.json). Obtain exactly those
-files at that revision through the GitHub MCP Server and place them under
-`.harness/source/coding-agent-harness`. Then verify the cache:
+[`harness/source-lock.json`](../harness/source-lock.json). The exact files are
+vendored at `harness/vendor/coding-agent-harness`; verify them before install:
 
 ```bash
 node scripts/harness.mjs source --target codex
@@ -136,12 +135,9 @@ not required. Set `HARNESS_PYTHON_COMMAND` to an executable path if automatic
 selection is unsuitable; an invalid override fails explicitly. Missing Python
 is reported as `missing-command`, separately from invalid TOML.
 
-Checking out the PR does not include the private source cache. Before APM
-install, use GitHub MCP to retrieve exactly the files at the ref in
-`harness/source-lock.json` into `.harness/source/coding-agent-harness/`. A
-previously verified local cache may also be copied; `source` verifies every
-file again.
-Do not copy the source repository's `.git` directory or extra files. A missing
-or different cache reports `source-mismatch` and leaves project configuration
-unchanged. APM never silently downloads this private source or bypasses the
-hashes.
+Checking out the branch includes the tracked vendor source. `source` verifies
+every file against `harness/source-lock.json` before APM changes project
+configuration. A missing or different vendor file reports `source-mismatch`
+and leaves project configuration unchanged. Updating the harness means
+updating the vendored files and lock hashes together; do not add a source
+repository `.git` directory or untracked extras.

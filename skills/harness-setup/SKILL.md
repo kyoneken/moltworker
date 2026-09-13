@@ -1,19 +1,18 @@
 ---
 name: harness-setup
-description: Safely retrieve the fixed source and install the visible APM harness.
+description: Verify the vendored fixed source and install the visible APM harness.
 ---
 
 # Harness setup
 
-Use the GitHub MCP Server to read every file named in `harness/source-lock.json`
-at its exact `repository` and 40-character `ref`. Do not use git, HTTP clients,
-or an APM remote dependency to retrieve the source.
+The exact source files named in `harness/source-lock.json` are vendored below
+`harness/vendor/coding-agent-harness`. Do not retrieve a second copy through
+git, HTTP clients, or an APM remote dependency.
 
-Before materializing a file, reject an absolute path, `..` path segment,
-symlink, or submodule. Write the MCP-fetched files only below
-`.harness/source/coding-agent-harness`, calculate SHA-256 for each result, and
-compare it with the lock before APM install. Stop when the GitHub MCP connection
-is unavailable or a file cannot be verified; do not substitute another ref.
+Before APM install, check the vendor tree for extra files, symlinks, and
+submodules. `node scripts/harness.mjs source --target <one-target>` calculates
+SHA-256 for every locked file and compares it with the fixed repository, ref,
+and APM version. Stop on any mismatch; do not substitute another ref.
 
 Run `node scripts/harness.mjs source --target <one-target>` only after all
 hashes match. Then run the root APM commands shown in `docs/harness-setup.md`:

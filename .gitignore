@@ -65,9 +65,10 @@ test/e2e/.dev.vars
 # Agent worktrees and execution ledgers
 .worktrees/
 .superpowers/
-.harness/
 apm_modules/
 .harness/compiled/
+.harness/source/
+.harness/state/
 .codex/config.toml
 .mcp.json
 .cursor/mcp.json
@@ -96,5 +97,7 @@ apm_modules/
 .agents/hooks/source/
 .codex/apm-hooks.json
 .claude/apm-hooks.json
+.claude/settings.json
 .cursor/apm-hooks.json
+.cursor/hooks.json
 .agents/apm-hooks.json

@@ -7,8 +7,7 @@ PR #66の更新後に、実際に使うクライアントだけ確認してく�
 - PRブランチの使い捨て作業コピーを用意する。日常利用する設定に初回テストを直接適用しない。
 - 作業コピーごとに対象クライアントを1つだけ選ぶ。APMのMCP installは、別クライアントの管理対象エントリをcleanすることがある。
 - Node.js 22、APM 0.29.0を用意する。`verify`を使う場合はPython 3.11以上（`tomllib`）、Grokを選ぶ場合はGrok CLIも必要。
-- 接続済みエージェントに `skills/harness-setup/SKILL.md` を読ませ、GitHub MCPで `harness/source-lock.json` の固定ref・指定ファイルだけを `.harness/source/coding-agent-harness` に取得する。リポジトリ全体のコピーでは余分なファイルの検証に失敗する。
-- GitHub MCPのprivate source読み取り権限がない場合は、そこで停止する。
+- `harness/vendor/coding-agent-harness` はCloneに同梱済みで、`harness/source-lock.json` の固定ref・指定ファイルと照合される。追加の取得操作は不要。
 - 使用クライアント、CLI版、1Password Desktop版を記録する。環境変数の全件表示や認証情報のコピーは不要。
 
 以下は Codex/Claude の基本手順です。`--target` を実際に使うクライアントへ

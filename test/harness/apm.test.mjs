@@ -4,7 +4,7 @@ import { test } from 'node:test';
 
 test('root APM manifest visibly declares local source and both base MCP servers', async () => {
   const manifest = await readFile(new URL('../../apm.yml', import.meta.url), 'utf8');
-  assert.match(manifest, /path:.*\.harness\/source\/coding-agent-harness/);
+  assert.match(manifest, /path:.*harness\/vendor\/coding-agent-harness/);
   assert.match(manifest, /name: 1password/);
   assert.match(manifest, /command: 1password-mcp/);
   assert.match(manifest, /url: https:\/\/docs\.mcp\.cloudflare\.com\/mcp/);

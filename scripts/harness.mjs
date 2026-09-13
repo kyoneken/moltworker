@@ -7,7 +7,7 @@ import { verifyInstalled } from './harness/verify.mjs';
 import { adaptCursorHooks } from './harness/cursor.mjs';
 import { summarizeDoctor } from './harness/doctor.mjs';
 
-const DEFAULT_SOURCE = '.harness/source/coding-agent-harness';
+const DEFAULT_SOURCE = 'harness/vendor/coding-agent-harness';
 const COMMAND_OPTIONS = {
   source: new Set(['--target', '--source']),
   verify: new Set(['--target', '--source']),
@@ -15,6 +15,10 @@ const COMMAND_OPTIONS = {
   adapt: new Set(['--target']),
 };
 const SETUP_ACTION = 'follow the explicit APM setup steps in docs/harness-setup.md';
+
+function sourceAction(source) {
+  return `restore ${source} from the tracked vendor directory, then rerun the APM setup steps in docs/harness-setup.md`;
+}
 
 function print(checks) { console.log(JSON.stringify(summarizeChecks(checks))); }
 function report(target, component, status, reason, nextAction) { print([result(target, component, status, reason, nextAction)]); }
@@ -54,7 +58,7 @@ async function main() {
   if (command === 'source') {
     try {
       const sourceResult = await sourceCheck(root, source);
-      report(target, 'source', sourceResult.ok ? 'pass' : 'fail', sourceResult.ok ? 'ok' : sourceResult.reason, sourceResult.ok ? 'none' : SETUP_ACTION);
+      report(target, 'source', sourceResult.ok ? 'pass' : 'fail', sourceResult.ok ? 'ok' : sourceResult.reason, sourceResult.ok ? 'none' : sourceAction(source));
       if (!sourceResult.ok) process.exitCode = 1;
     } catch { report(target, 'source', 'fail', 'invalid-config', SETUP_ACTION); process.exitCode = 1; }
     return;
@@ -62,7 +66,7 @@ async function main() {
   if (command === 'verify') {
     try {
       const sourceResult = await sourceCheck(root, source);
-      const checks = [result(target, 'source', sourceResult.ok ? 'pass' : 'fail', sourceResult.ok ? 'ok' : sourceResult.reason, sourceResult.ok ? 'none' : SETUP_ACTION)];
+      const checks = [result(target, 'source', sourceResult.ok ? 'pass' : 'fail', sourceResult.ok ? 'ok' : sourceResult.reason, sourceResult.ok ? 'none' : sourceAction(source))];
       if (sourceResult.ok) {
         const installed = await verifyInstalled({ root, target });
         checks.push(result(target, 'config', installed.ok ? 'pass' : 'fail', installed.ok ? 'ok' : installed.reason, installed.ok ? 'none' : SETUP_ACTION));

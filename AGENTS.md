@@ -170,9 +170,10 @@ node scripts/harness.mjs verify --target codex
 node scripts/harness.mjs doctor --target codex
 ```
 
-The source directory is private and source-derived output is ignored by Git.
-The root `apm.yml` keeps the install inputs visible; APM owns generated files
-and cleanup. Cursor additionally runs `node scripts/harness.mjs adapt --target
+The source files are vendored under `harness/vendor/coding-agent-harness` and
+verified against `harness/source-lock.json`; generated output is ignored by
+Git. The root `apm.yml` keeps the install inputs visible; APM owns generated
+files and cleanup. Cursor additionally runs `node scripts/harness.mjs adapt --target
 cursor`, Grok Build uses its native `grok mcp add --scope project` commands,
 and Antigravity skips project-local remote MCP. Use the `harness-setup` skill
 for source retrieval and target-specific MCP onboarding, and

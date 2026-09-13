@@ -5,9 +5,8 @@ targets: [codex, claude, cursor, grok-build, antigravity]
 includes: []
 dependencies:
   apm:
-    # Retrieve the exact revision/files in harness/source-lock.json via GitHub MCP.
-    # This local dependency keeps APM from making GitHub network calls.
-    - path: './.harness/source/coding-agent-harness'
+    # The locked source is vendored so a fresh clone is immediately installable.
+    - path: './harness/vendor/coding-agent-harness'
   mcp:
     # These register servers; they do not install executables or authenticate.
     - name: 1password

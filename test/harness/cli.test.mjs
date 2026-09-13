@@ -11,7 +11,7 @@ async function fixture() {
   const root = await makeRoot();
   roots.push(root);
   const manifest = 'targets: [codex]\n';
-  await write(root, '.harness/source/coding-agent-harness/apm.yml', manifest);
+  await write(root, 'harness/vendor/coding-agent-harness/apm.yml', manifest);
   await write(root, 'harness/source-lock.json', JSON.stringify({ schemaVersion: 1, repository: 'kyoneken/coding-agent-harness', ref: 'f26054f6256e10a107d800d2023defa94f2f71a7', apmVersion: '0.29.0', files: [{ path: 'apm.yml', sha256: sha256(manifest) }] }));
   return root;
 }
@@ -21,6 +21,15 @@ test('source verifies the default locked cache without running APM', async () =>
   const output = await runHarness(['source', '--target', 'codex'], { root });
   assert.equal(output.code, 0, output.stderr);
   assert.equal(JSON.parse(output.stdout).checks[0].component, 'source');
+});
+
+test('source mismatch points to the tracked vendor source', async () => {
+  const root = await makeRoot();
+  roots.push(root);
+  await write(root, 'harness/source-lock.json', JSON.stringify({ schemaVersion: 1, repository: 'kyoneken/coding-agent-harness', ref: 'f26054f6256e10a107d800d2023defa94f2f71a7', apmVersion: '0.29.0', files: [{ path: 'apm.yml', sha256: sha256('name: test\\n') }] }));
+  const output = await runHarness(['source', '--target', 'codex'], { root });
+  assert.equal(output.code, 1);
+  assert.match(output.stdout, /tracked vendor directory/);
 });
 
 test('legacy wrapper commands are rejected so APM remains the visible setup path', async () => {
