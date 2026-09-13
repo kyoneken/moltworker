@@ -1,19 +1,24 @@
 import { describe, expect, it, vi } from 'vitest';
-import { DEFAULT_MODEL, KIMI_MODEL } from '../ai-proxy/models';
+import { DEFAULT_MODEL, KIMI_MODEL, type AdminModelRecord } from '../ai-proxy/models';
 import { createMockEnv } from '../test-utils';
 import { api } from './api';
+
+interface AdminModelListResponse {
+  object: 'list';
+  data: AdminModelRecord[];
+}
 
 describe('admin model APIs', () => {
   it('lists allowlisted models with primary and manual-only flags', async () => {
     const response = await api.request('/admin/models', { method: 'GET' }, createMockEnv({ DEV_MODE: 'true' }));
     expect(response.status).toBe(200);
-    const body = await response.json();
+    const body = (await response.json()) as AdminModelListResponse;
     expect(body.data[0]).toMatchObject({
       id: DEFAULT_MODEL,
       primary: true,
       manual_only: false,
     });
-    expect(body.data.find((model: { id: string }) => model.id === KIMI_MODEL)).toMatchObject({
+    expect(body.data.find((model) => model.id === KIMI_MODEL)).toMatchObject({
       manual_only: true,
       primary: false,
     });
