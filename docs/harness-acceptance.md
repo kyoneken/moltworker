@@ -38,7 +38,7 @@ Grok BuildではMCP installを実行せず、native CLIを使います。
 apm install --only apm --target grok-build --frozen
 apm compile --target grok-build --root .harness/compiled/grok-build
 grok mcp add --scope project 1password -- 1password-mcp
-grok mcp add --scope project cloudflare-docs https://docs.mcp.cloudflare.com/mcp
+grok mcp add --scope project --transport http cloudflare-docs https://docs.mcp.cloudflare.com/mcp
 node scripts/harness.mjs verify --target grok-build
 ```
 
@@ -114,7 +114,7 @@ Cursor adapter afterward. Grok Build uses its native project MCP command with
 the Observability URL:
 
 ```sh
-grok mcp add --scope project cloudflare-observability https://observability.mcp.cloudflare.com/mcp
+grok mcp add --scope project --transport http cloudflare-observability https://observability.mcp.cloudflare.com/mcp
 ```
 
 Antigravity remains unsupported for project-local remote MCP.

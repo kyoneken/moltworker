@@ -65,7 +65,7 @@ the project-scoped MCP servers with the native CLI:
 apm install --only apm --target grok-build --frozen
 apm compile --target grok-build --root .harness/compiled/grok-build
 grok mcp add --scope project 1password -- 1password-mcp
-grok mcp add --scope project cloudflare-docs https://docs.mcp.cloudflare.com/mcp
+grok mcp add --scope project --transport http cloudflare-docs https://docs.mcp.cloudflare.com/mcp
 node scripts/harness.mjs verify --target grok-build
 ```
 
