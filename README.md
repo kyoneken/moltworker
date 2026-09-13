@@ -20,6 +20,36 @@ The following Cloudflare features used by this project have free tiers:
 - AI Gateway (inference logging and usage controls)
 - R2 Storage (snapshot persistence)
 
+## Development Agent Harness (Optional)
+
+This repository includes a project-scoped harness for Codex, Claude Code,
+Cursor, Grok Build, and Antigravity. It distributes shared agent rules and
+skills through APM and provides project MCP setup for 1Password and Cloudflare
+Docs. The harness is for development workflows and does not change the
+deployed Worker.
+
+The source is vendored and hash-locked, so a fresh clone does not need an
+additional source download. Use Node.js 22 and APM 0.29.0, then choose one
+target for the working copy. For Codex or Claude Code, run:
+
+```bash
+node scripts/harness.mjs source --target codex
+apm install --only apm --target codex --frozen
+apm install --only mcp --target codex --frozen
+apm compile --target codex --root .harness/compiled/codex
+node scripts/harness.mjs verify --target codex
+```
+
+Replace `codex` with the selected target. Cursor needs the adapter step, Grok
+Build registers MCP servers with its native project CLI, and Antigravity does
+not receive project-local remote MCP. See the [harness setup guide](docs/harness-setup.md)
+for target-specific commands, the [support matrix](docs/harness-support.md),
+and the [acceptance checklist](docs/harness-acceptance.md).
+
+The 1Password entry invokes only the local `1password-mcp` command. The first
+authorized Environment access may require 1Password Desktop approval. Do not
+add selectors, tokens, or secret values to MCP arguments or tracked files.
+
 ## Container Cost Estimate
 
 This project uses a `standard-1` Cloudflare Container instance (1/2 vCPU, 4 GiB memory, 8 GB disk). Below are approximate monthly costs assuming the container runs 24/7, based on [Cloudflare Containers pricing](https://developers.cloudflare.com/containers/pricing/):

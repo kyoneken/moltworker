@@ -153,8 +153,9 @@ npm run typecheck     # TypeScript check
 
 ### Multi-agent harness
 
-See [the user acceptance checklist](docs/harness-acceptance.md) for per-client
-loading, Hook trust, Desktop approval, MCP connection, and cleanup checks.
+See the [harness setup guide](docs/harness-setup.md) and [user acceptance
+checklist](docs/harness-acceptance.md) for per-client loading, Hook trust,
+Desktop approval, MCP connection, and cleanup checks.
 
 The project-scoped harness is installed from the fixed source revision recorded
 in `harness/source-lock.json`. It is intentionally run against one agent target
