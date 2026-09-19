@@ -1,9 +1,21 @@
 import { describe, expect, it } from 'vitest';
 import { AAGUID_PRODUCTION, AAGUID_SANDBOX } from './config';
 import { derEcdsaToRaw, encodeOid, rawEcdsaToDer, decodeOid } from './asn1';
-import { decodeCbor, encodeCbor } from './cbor';
-import { bytesEqual, encodeUtf8, sha256 } from './encoding';
-import { bindClientData, verifyAssertionObject, verifyAttestationObject } from './verify';
+import { decodeCbor, encodeCbor, encodeCborMap } from './cbor';
+import {
+  bytesEqual,
+  bytesToBase64,
+  bytesToBase64url,
+  decodeFlexibleBase64,
+  encodeUtf8,
+  sha256,
+} from './encoding';
+import {
+  ASSERTION_PAYLOAD_ERROR,
+  bindClientData,
+  verifyAssertionObject,
+  verifyAttestationObject,
+} from './verify';
 import { environmentFromAaguid, parseAuthenticatorData, buildAuthenticatorData } from './authdata';
 import { createSyntheticAssertion, createSyntheticAttestation } from './fixtures';
 
@@ -57,6 +69,43 @@ describe('authenticator data', () => {
   it('maps production aaguid separately from sandbox', () => {
     expect(environmentFromAaguid(AAGUID_PRODUCTION)).toBe('production');
     expect(environmentFromAaguid(AAGUID_SANDBOX)).toBe('sandbox');
+  });
+
+  it('describes short assertion-shaped authData when attested credential is required', () => {
+    const raw = buildAuthenticatorData({
+      rpIdHash: new Uint8Array(32).fill(1),
+      flags: 0x01,
+      signCounter: 0,
+    });
+    expect(raw.length).toBe(37);
+    expect(() => parseAuthenticatorData(raw, true)).toThrow(
+      /authenticatorData missing attested credential data \(authData\.length=37, flags=0x01, AT=false\)/,
+    );
+  });
+
+  it('includes AT=true when the flag is set but the buffer is still truncated', () => {
+    const raw = buildAuthenticatorData({
+      rpIdHash: new Uint8Array(32).fill(2),
+      flags: 0x41,
+      signCounter: 0,
+    });
+    expect(raw.length).toBe(37);
+    expect(() => parseAuthenticatorData(raw, true)).toThrow(
+      /authData\.length=37, flags=0x41, AT=true/,
+    );
+  });
+});
+
+describe('flexible base64', () => {
+  it('round-trips large standard and base64url payloads without truncation', () => {
+    const bytes = new Uint8Array(12 * 1024);
+    for (let i = 0; i < bytes.length; i++) {
+      bytes[i] = (i * 37 + 11) & 0xff;
+    }
+    const standard = bytesToBase64(bytes);
+    const wrapped = (standard.match(/.{1,64}/g) ?? [standard]).join('\n');
+    expect(decodeFlexibleBase64(wrapped)).toEqual(bytes);
+    expect(decodeFlexibleBase64(`  ${bytesToBase64url(bytes)}  `)).toEqual(bytes);
   });
 });
 
@@ -169,5 +218,75 @@ describe('synthetic attestation and assertion verification', () => {
         storedCounter: 3,
       }),
     ).rejects.toThrow(/not increasing/);
+  });
+
+  it('verifies attestations whose CBOR map uses CTAP2 integer keys 1/2/3', async () => {
+    const fixture = await createSyntheticAttestation({ appId: APP_ID, environment: 'sandbox' });
+    const decoded = decodeCbor(decodeFlexibleBase64(fixture.attestation)) as {
+      fmt: string;
+      authData: Uint8Array;
+      attStmt: { x5c: Uint8Array[]; receipt: Uint8Array };
+    };
+    const integerKeyed = encodeCborMap([
+      [1, decoded.fmt],
+      [2, decoded.authData],
+      [3, decoded.attStmt],
+    ]);
+    const result = await verifyAttestationObject({
+      attestation: bytesToBase64url(integerKeyed),
+      keyId: fixture.keyId,
+      challenge: fixture.challenge,
+      appId: APP_ID,
+      allowedEnvs: new Set(['sandbox']),
+      trustAnchorDer: fixture.rootDer,
+    });
+    expect(result.keyId).toBe(fixture.keyId);
+    expect(result.env).toBe('sandbox');
+  });
+
+  it('rejects an assertion CBOR payload posted as an attestation', async () => {
+    const fixture = await createSyntheticAttestation({ appId: APP_ID });
+    const assertion = await createSyntheticAssertion({
+      appId: APP_ID,
+      device: fixture.device,
+      clientData: fixture.challenge,
+      signCounter: 1,
+    });
+    await expect(
+      verifyAttestationObject({
+        attestation: assertion,
+        keyId: fixture.keyId,
+        challenge: fixture.challenge,
+        appId: APP_ID,
+        allowedEnvs: new Set(['sandbox']),
+        trustAnchorDer: fixture.rootDer,
+      }),
+    ).rejects.toThrow(ASSERTION_PAYLOAD_ERROR);
+  });
+
+  it('includes authData diagnostics when attestation authData is assertion-sized', async () => {
+    const authData = buildAuthenticatorData({
+      rpIdHash: new Uint8Array(32).fill(3),
+      flags: 0x01,
+      signCounter: 0,
+    });
+    const attestation = bytesToBase64url(
+      encodeCbor({
+        fmt: 'apple-appattest',
+        authData,
+        attStmt: { x5c: [Uint8Array.of(1)] },
+      }),
+    );
+    await expect(
+      verifyAttestationObject({
+        attestation,
+        keyId: bytesToBase64url(new Uint8Array(32).fill(9)),
+        challenge: new Uint8Array(32).fill(4),
+        appId: APP_ID,
+        allowedEnvs: new Set(['sandbox']),
+      }),
+    ).rejects.toThrow(
+      /authenticatorData missing attested credential data \(authData\.length=37, flags=0x01, AT=false\)/,
+    );
   });
 });

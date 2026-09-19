@@ -15,6 +15,9 @@ import type { AttestAppEnv, AttestEnv } from './types';
 
 export const attestRoutes = new Hono<AttestAppEnv>();
 
+/** Stable substring `unknown keyId` so iOS can clear Keychain and re-attest. */
+export const UNKNOWN_KEY_ID_ERROR = 'unknown keyId; device is not attested';
+
 function jsonError(
   c: { json: (data: unknown, status: number) => Response },
   error: unknown,
@@ -111,7 +114,7 @@ attestRoutes.post('/assert', async (c) => {
     const keyId = normalizeKeyId(body.keyId);
     const stored = await getCredential(c.env, keyId);
     if (!stored) {
-      return c.json({ error: 'Unknown keyId — device not attested' }, 401);
+      return c.json({ error: UNKNOWN_KEY_ID_ERROR }, 401);
     }
     const challenge = await consumeChallenge(c.env, body.challengeId);
     const challengeBytes = base64urlToBytes(challenge.challenge);

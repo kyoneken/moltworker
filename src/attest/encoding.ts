@@ -65,12 +65,30 @@ export function base64urlToBytes(value: string): Uint8Array {
 
 /**
  * Decode Apple/iOS payloads that may arrive as either standard Base64 or Base64URL.
+ * Interior whitespace is stripped so PEM-wrapped or pretty-printed payloads are not
+ * truncated or rejected. The full input is decoded; there is no max-length cutoff.
  */
 export function decodeFlexibleBase64(value: string): Uint8Array {
-  const trimmed = value.trim();
+  const trimmed = value.replace(/\s+/g, '');
   if (!trimmed) {
     throw new Error('empty base64 payload');
   }
+  const decoded = decodeFlexibleBase64Raw(trimmed);
+  const expected = expectedBase64DecodedLength(trimmed);
+  if (decoded.length !== expected) {
+    throw new Error(
+      `base64 decoded length ${decoded.length} does not match input (${expected} expected)`,
+    );
+  }
+  return decoded;
+}
+
+function expectedBase64DecodedLength(value: string): number {
+  const unpadded = value.replace(/=+$/g, '');
+  return Math.floor((unpadded.length * 3) / 4);
+}
+
+function decodeFlexibleBase64Raw(trimmed: string): Uint8Array {
   if (trimmed.includes('-') || trimmed.includes('_') || BASE64URL_RE.test(trimmed)) {
     try {
       return base64urlToBytes(trimmed);

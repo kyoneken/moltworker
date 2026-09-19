@@ -128,6 +128,15 @@ function concat(parts: Uint8Array[]): Uint8Array {
   return out;
 }
 
+/** Encode a CBOR map from explicit key/value pairs so keys can be CTAP2 integers. */
+export function encodeCborMap(pairs: Array<[CborValue, CborValue]>): Uint8Array {
+  const items: Uint8Array[] = [];
+  for (const [key, value] of pairs) {
+    items.push(encodeCbor(key), encodeCbor(value));
+  }
+  return concat([encodeHead(5, pairs.length), ...items]);
+}
+
 export function encodeCbor(value: CborValue): Uint8Array {
   if (value === null) {
     return Uint8Array.of(0xf6);
