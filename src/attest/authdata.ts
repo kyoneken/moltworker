@@ -11,14 +11,23 @@ export interface AuthenticatorData {
   raw: Uint8Array;
 }
 
-const AT_FLAG = 0x40;
+export const AT_FLAG = 0x40;
+
+export function describeAuthDataFlags(raw: Uint8Array): string {
+  if (raw.length < 33) {
+    return `authData.length=${raw.length}`;
+  }
+  const flags = raw[32];
+  const atSet = (flags & AT_FLAG) !== 0;
+  return `authData.length=${raw.length}, flags=0x${flags.toString(16).padStart(2, '0')}, AT=${atSet}`;
+}
 
 export function parseAuthenticatorData(
   raw: Uint8Array,
   requireAttestedCredential = false,
 ): AuthenticatorData {
   if (raw.length < 37) {
-    throw new Error('authenticatorData too short');
+    throw new Error(`authenticatorData too short (${describeAuthDataFlags(raw)})`);
   }
   const view = new DataView(raw.buffer, raw.byteOffset, raw.byteLength);
   const rpIdHash = raw.slice(0, 32);
@@ -30,7 +39,9 @@ export function parseAuthenticatorData(
   }
 
   if (raw.length < 55) {
-    throw new Error('authenticatorData missing attested credential data');
+    throw new Error(
+      `authenticatorData missing attested credential data (${describeAuthDataFlags(raw)})`,
+    );
   }
   const aaguid = raw.slice(37, 53);
   const credentialIdLength = view.getUint16(53, false);

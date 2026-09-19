@@ -31,6 +31,14 @@ export class AttestVerificationError extends Error {
   }
 }
 
+/** Stable message when /v1/attest receives an assertion-shaped CBOR payload. */
+export const ASSERTION_PAYLOAD_ERROR = 'payload looks like an assertion, not an attestation';
+
+/** CTAP2 attestation-object integer keys: 1=fmt, 2=authData, 3=attStmt. */
+const CTAP_FMT = 1;
+const CTAP_AUTH_DATA = 2;
+const CTAP_ATT_STMT = 3;
+
 export interface VerifyAttestationOptions {
   attestation: string;
   keyId: string;
@@ -64,14 +72,53 @@ function asBytes(value: unknown, label: string): Uint8Array {
   throw new AttestVerificationError(`${label} must be a byte string`);
 }
 
+function cborField(decoded: Record<string, unknown>, stringKey: string, intKey: number): unknown {
+  if (Object.prototype.hasOwnProperty.call(decoded, stringKey)) {
+    return decoded[stringKey];
+  }
+  return decoded[String(intKey)];
+}
+
+function attestationFmt(decoded: Record<string, unknown>): unknown {
+  return cborField(decoded, 'fmt', CTAP_FMT);
+}
+
+export function looksLikeAssertionObject(decoded: Record<string, unknown>): boolean {
+  if (attestationFmt(decoded) === 'apple-appattest') {
+    return false;
+  }
+  const stringAssertion =
+    decoded.signature instanceof Uint8Array && decoded.authenticatorData instanceof Uint8Array;
+  const integerAssertion =
+    decoded[String(CTAP_AUTH_DATA)] instanceof Uint8Array &&
+    decoded[String(CTAP_ATT_STMT)] instanceof Uint8Array &&
+    !decoded.attStmt &&
+    !decoded.authData;
+  return stringAssertion || integerAssertion;
+}
+
+function parseAuthDataOrThrow(raw: Uint8Array, requireAttestedCredential: boolean) {
+  try {
+    return parseAuthenticatorData(raw, requireAttestedCredential);
+  } catch (error) {
+    throw new AttestVerificationError(
+      error instanceof Error ? error.message : 'invalid authenticatorData',
+    );
+  }
+}
+
 export async function verifyAttestationObject(
   options: VerifyAttestationOptions,
 ): Promise<AttestationVerifyResult> {
   const decoded = asObject(decodeCbor(decodeFlexibleBase64(options.attestation)));
-  if (decoded.fmt !== 'apple-appattest') {
-    throw new AttestVerificationError(`unexpected attestation fmt: ${String(decoded.fmt)}`);
+  if (looksLikeAssertionObject(decoded)) {
+    throw new AttestVerificationError(ASSERTION_PAYLOAD_ERROR);
   }
-  const attStmt = asObject(decoded.attStmt);
+  const fmt = attestationFmt(decoded);
+  if (fmt !== 'apple-appattest') {
+    throw new AttestVerificationError(`unexpected attestation fmt: ${String(fmt)}`);
+  }
+  const attStmt = asObject(cborField(decoded, 'attStmt', CTAP_ATT_STMT));
   const x5cRaw = attStmt.x5c;
   if (!Array.isArray(x5cRaw) || x5cRaw.length === 0) {
     throw new AttestVerificationError('attestation missing x5c');
@@ -82,8 +129,8 @@ export async function verifyAttestationObject(
     }
     return cert;
   });
-  const authData = asBytes(decoded.authData, 'authData');
-  const parsed = parseAuthenticatorData(authData, true);
+  const authData = asBytes(cborField(decoded, 'authData', CTAP_AUTH_DATA), 'authData');
+  const parsed = parseAuthDataOrThrow(authData, true);
   if (!parsed.aaguid || !parsed.credentialId) {
     throw new AttestVerificationError('attestation missing credential data');
   }
@@ -137,9 +184,12 @@ export async function verifyAssertionObject(
   options: VerifyAssertionOptions,
 ): Promise<AssertionVerifyResult> {
   const decoded = asObject(decodeCbor(decodeFlexibleBase64(options.assertion)));
-  const signature = asBytes(decoded.signature, 'signature');
-  const authenticatorData = asBytes(decoded.authenticatorData, 'authenticatorData');
-  const parsed = parseAuthenticatorData(authenticatorData, false);
+  const signature = asBytes(cborField(decoded, 'signature', CTAP_ATT_STMT), 'signature');
+  const authenticatorData = asBytes(
+    cborField(decoded, 'authenticatorData', CTAP_AUTH_DATA),
+    'authenticatorData',
+  );
+  const parsed = parseAuthDataOrThrow(authenticatorData, false);
 
   const expectedRpIdHash = await sha256(new TextEncoder().encode(options.appId));
   if (!bytesEqual(expectedRpIdHash, parsed.rpIdHash)) {

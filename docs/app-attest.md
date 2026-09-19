@@ -76,7 +76,12 @@ Consumes the challenge, verifies the Apple App Attest object, stores
 
 Verification includes:
 
-- `fmt` is `apple-appattest`
+- `fmt` is `apple-appattest` (string key `fmt` or CTAP2 integer key `1`)
+- `authData` / `attStmt` accept string keys or CTAP2 integer keys `2` / `3`
+- Assertion-shaped CBOR (`signature` + `authenticatorData`, no `fmt`) posted to
+  `/v1/attest` returns `payload looks like an assertion, not an attestation`.
+  After a failed attest, iOS should clear the stored `keyId` and call
+  `attestKey` again instead of `generateAssertion`.
 - x5c chain to the pinned Apple App Attest Root CA (or
   `ATTEST_TRUST_ANCHOR_PEM` in tests). The root is ECDSA **P-384 / SHA-384**;
   intermediates and the device credential key stay **P-256 / SHA-256**. Chain
@@ -111,8 +116,9 @@ Assertion signatures are verified as ECDSA P-256 over
 signature to IEEE P1363 `r||s`. The authenticator sign counter must **strictly
 increase**. Replay / non-increasing counters return 401.
 
-Unknown `keyId` returns `401` with `Unknown keyId — device not attested` so the
-iOS client can wipe the local key and re-attest.
+Unknown `keyId` returns `401` with `unknown keyId; device is not attested` so the
+iOS client can wipe the local key and re-attest. Match the substring
+`unknown keyId`.
 
 ### Access External Evaluation
 

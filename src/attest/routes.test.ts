@@ -3,8 +3,10 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { attestApp } from './index';
 import { createAttestEnv } from './test-utils';
 import { createSyntheticAssertion, createSyntheticAttestation } from './fixtures';
-import { base64urlToBytes } from './encoding';
+import { base64urlToBytes, bytesToBase64url } from './encoding';
 import { publicJwks } from './access';
+import { UNKNOWN_KEY_ID_ERROR } from './routes';
+import { ASSERTION_PAYLOAD_ERROR } from './verify';
 
 const APP_ID = 'CYGQ9U7DD2.com.kentymyty.moltworker.mobile.pilot';
 
@@ -243,5 +245,69 @@ describe('App Attest HTTP API', () => {
     const allowedBody = (await allowed.json()) as { token: string };
     const allowedPayload = await jwtVerify(allowedBody.token, verifyKey);
     expect(allowedPayload.payload.success).toBe(true);
+  });
+
+  it('rejects assertion CBOR posted to /v1/attest with a clear error', async () => {
+    const env = createAttestEnv();
+    const challengeResponse = await attestApp.request(
+      'https://attest.kentymyty.com/v1/challenge',
+      {},
+      env,
+    );
+    const issued = (await challengeResponse.json()) as { challengeId: string; challenge: string };
+    const fixture = await createSyntheticAttestation({
+      appId: APP_ID,
+      challenge: base64urlToBytes(issued.challenge),
+    });
+    const assertion = await createSyntheticAssertion({
+      appId: APP_ID,
+      device: fixture.device,
+      clientData: base64urlToBytes(issued.challenge),
+      signCounter: 1,
+    });
+    const response = await attestApp.request(
+      'https://attest.kentymyty.com/v1/attest',
+      {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          challengeId: issued.challengeId,
+          keyId: fixture.keyId,
+          attestation: assertion,
+        }),
+      },
+      env,
+    );
+    expect(response.status).toBe(401);
+    const body = (await response.json()) as { error: string };
+    expect(body.error).toBe(ASSERTION_PAYLOAD_ERROR);
+  });
+
+  it('returns a recognizable unknown keyId error when the credential was never stored', async () => {
+    const env = createAttestEnv();
+    const challengeResponse = await attestApp.request(
+      'https://attest.kentymyty.com/v1/challenge',
+      {},
+      env,
+    );
+    const issued = (await challengeResponse.json()) as { challengeId: string; challenge: string };
+    const response = await attestApp.request(
+      'https://attest.kentymyty.com/v1/assert',
+      {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          keyId: bytesToBase64url(new Uint8Array(32).fill(7)),
+          challengeId: issued.challengeId,
+          assertion: bytesToBase64url(new Uint8Array([0xa2])),
+          clientData: issued.challenge,
+        }),
+      },
+      env,
+    );
+    expect(response.status).toBe(401);
+    const body = (await response.json()) as { error: string };
+    expect(body.error).toContain('unknown keyId');
+    expect(body.error).toBe(UNKNOWN_KEY_ID_ERROR);
   });
 });
