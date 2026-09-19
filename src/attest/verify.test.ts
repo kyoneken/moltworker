@@ -21,6 +21,24 @@ import { createSyntheticAssertion, createSyntheticAttestation } from './fixtures
 
 const APP_ID = 'CYGQ9U7DD2.com.kentymyty.moltworker.mobile.pilot';
 
+function thrownMessage(fn: () => void): string {
+  try {
+    fn();
+  } catch (error) {
+    return error instanceof Error ? error.message : String(error);
+  }
+  throw new Error('expected function to throw');
+}
+
+async function rejectionMessage(promise: Promise<unknown>): Promise<string> {
+  try {
+    await promise;
+  } catch (error) {
+    return error instanceof Error ? error.message : String(error);
+  }
+  throw new Error('expected promise to reject');
+}
+
 describe('CBOR and ASN.1 helpers', () => {
   it('round-trips maps, byte strings, and text', () => {
     const encoded = encodeCbor({
@@ -30,6 +48,55 @@ describe('CBOR and ASN.1 helpers', () => {
     const decoded = decodeCbor(encoded) as { fmt: string; authData: Uint8Array };
     expect(decoded.fmt).toBe('apple-appattest');
     expect(Array.from(decoded.authData)).toEqual([1, 2, 3]);
+  });
+
+  it('throws when a declared byte-string length extends past the buffer', () => {
+    // Major type 2, additional 5: claims 5 payload bytes, only 2 follow.
+    expect(() => decodeCbor(Uint8Array.of(0x45, 0x01, 0x02))).toThrow(
+      /truncated CBOR byte string \(expected 5 bytes at offset 1, available 2\)/,
+    );
+  });
+
+  it('throws when a declared text-string length extends past the buffer', () => {
+    // Major type 3, additional 4: claims 4 UTF-8 bytes, only 1 follows.
+    expect(() => decodeCbor(Uint8Array.of(0x64, 0x61))).toThrow(
+      /truncated CBOR text string \(expected 4 bytes at offset 1, available 1\)/,
+    );
+  });
+
+  it('throws when the root value is followed by trailing bytes', () => {
+    const encoded = encodeCbor({ fmt: 'apple-appattest' });
+    const trailing = new Uint8Array(encoded.length + 1);
+    trailing.set(encoded);
+    trailing[encoded.length] = 0x00;
+    expect(() => decodeCbor(trailing)).toThrow(
+      new RegExp(`trailing CBOR bytes \\(next=${encoded.length}, length=${trailing.length}\\)`),
+    );
+  });
+
+  it('throws at CBOR decode when last-map authData is truncated (does not clamp to 37 + AT)', () => {
+    const authData = buildAuthenticatorData({
+      rpIdHash: new Uint8Array(32).fill(9),
+      flags: 0x40,
+      signCounter: 0,
+      aaguid: AAGUID_PRODUCTION,
+      credentialId: new Uint8Array(32).fill(8),
+    });
+    expect(authData.length).toBeGreaterThan(37);
+    expect(authData[32] & 0x40).toBe(0x40);
+
+    const encoded = encodeCbor({
+      fmt: 'apple-appattest',
+      attStmt: { x5c: [Uint8Array.of(1)] },
+      authData,
+    });
+    const truncated = encoded.subarray(0, encoded.length - (authData.length - 37));
+    const message = thrownMessage(() => decodeCbor(truncated));
+    expect(message).toMatch(
+      /truncated CBOR byte string \(expected \d+ bytes at offset \d+, available 37\)/,
+    );
+    expect(message).not.toMatch(/missing attested credential data/);
+    expect(message).not.toMatch(/authData\.length=37/);
   });
 
   it('converts ECDSA DER signatures to raw P1363 and back', () => {
@@ -286,7 +353,38 @@ describe('synthetic attestation and assertion verification', () => {
         allowedEnvs: new Set(['sandbox']),
       }),
     ).rejects.toThrow(
-      /authenticatorData missing attested credential data \(authData\.length=37, flags=0x01, AT=false\)/,
+      /authenticatorData missing attested credential data \(authData\.length=37, flags=0x01, AT=false\); attestationDecodedBytes=\d+, keys=\[fmt,authData,attStmt\], fmt\.size=15, attStmt\.size=\d+, authData\.size=37/,
     );
+  });
+
+  it('rejects truncated last-field authData at CBOR decode, not the 37-byte AT parser', async () => {
+    const authData = buildAuthenticatorData({
+      rpIdHash: new Uint8Array(32).fill(9),
+      flags: 0x40,
+      signCounter: 0,
+      aaguid: AAGUID_PRODUCTION,
+      credentialId: new Uint8Array(32).fill(8),
+    });
+    const encoded = encodeCbor({
+      fmt: 'apple-appattest',
+      attStmt: { x5c: [Uint8Array.of(1)] },
+      authData,
+    });
+    const truncated = encoded.subarray(0, encoded.length - (authData.length - 37));
+    const message = await rejectionMessage(
+      verifyAttestationObject({
+        attestation: bytesToBase64url(truncated),
+        keyId: bytesToBase64url(new Uint8Array(32).fill(9)),
+        challenge: new Uint8Array(32).fill(4),
+        appId: APP_ID,
+        allowedEnvs: new Set(['production']),
+      }),
+    );
+    expect(message).toMatch(
+      /truncated CBOR byte string \(expected \d+ bytes at offset \d+, available 37\)/,
+    );
+    expect(message).toMatch(/attestationDecodedBytes=/);
+    expect(message).not.toMatch(/missing attested credential data/);
+    expect(message).not.toMatch(/authData\.length=37/);
   });
 });
