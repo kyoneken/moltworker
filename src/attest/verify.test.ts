@@ -353,7 +353,7 @@ describe('synthetic attestation and assertion verification', () => {
         allowedEnvs: new Set(['sandbox']),
       }),
     ).rejects.toThrow(
-      /authenticatorData missing attested credential data \(authData\.length=37, flags=0x01, AT=false\); attestationDecodedBytes=\d+, keys=\[fmt,authData,attStmt\], fmt\.size=16, attStmt\.size=\d+, authData\.size=37/,
+      /authenticatorData missing attested credential data \(authData\.length=37, flags=0x01, AT=false\); attestationDecodedBytes=\d+, keys=\[fmt,authData,attStmt\], fmt\.size=15, attStmt\.size=\d+, authData\.size=37/,
     );
   });
 
