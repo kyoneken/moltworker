@@ -1,4 +1,4 @@
-import { decodeCbor } from './cbor';
+import { decodeCbor, encodeCbor, type CborValue } from './cbor';
 import { allowedEnvironments, requireAppId } from './config';
 import {
   bytesEqual,
@@ -8,7 +8,7 @@ import {
   normalizeKeyId,
   sha256,
 } from './encoding';
-import { environmentFromAaguid, parseAuthenticatorData } from './authdata';
+import { environmentFromAaguid, parseAuthenticatorData, type AuthenticatorData } from './authdata';
 import { appleAppAttestRootDer } from './apple-root';
 import {
   extractAppleNonce,
@@ -107,10 +107,60 @@ function parseAuthDataOrThrow(raw: Uint8Array, requireAttestedCredential: boolea
   }
 }
 
+function cborFieldSize(value: unknown): string {
+  if (value === undefined) {
+    return 'missing';
+  }
+  if (value instanceof Uint8Array) {
+    return String(value.length);
+  }
+  if (typeof value === 'string') {
+    return String(value.length);
+  }
+  try {
+    return String(encodeCbor(value as CborValue).length);
+  } catch {
+    return 'unencodable';
+  }
+}
+
+function describeAttestationMap(
+  decoded: Record<string, unknown>,
+  decodedBytes: Uint8Array,
+): string {
+  const keys = Object.keys(decoded).join(',');
+  const fmt = cborField(decoded, 'fmt', CTAP_FMT);
+  const attStmt = cborField(decoded, 'attStmt', CTAP_ATT_STMT);
+  const authDataField = cborField(decoded, 'authData', CTAP_AUTH_DATA);
+  return [
+    `attestationDecodedBytes=${decodedBytes.length}`,
+    `keys=[${keys}]`,
+    `fmt.size=${cborFieldSize(fmt)}`,
+    `attStmt.size=${cborFieldSize(attStmt)}`,
+    `authData.size=${cborFieldSize(authDataField)}`,
+  ].join(', ');
+}
+
+function decodeCborMap(
+  payload: string,
+  decodedBytesLabel: string,
+): { decoded: Record<string, unknown>; decodedBytes: Uint8Array } {
+  const decodedBytes = decodeFlexibleBase64(payload);
+  try {
+    return { decoded: asObject(decodeCbor(decodedBytes)), decodedBytes };
+  } catch (error) {
+    if (error instanceof AttestVerificationError) {
+      throw error;
+    }
+    const message = error instanceof Error ? error.message : 'invalid CBOR';
+    throw new AttestVerificationError(`${message} (${decodedBytesLabel}=${decodedBytes.length})`);
+  }
+}
+
 export async function verifyAttestationObject(
   options: VerifyAttestationOptions,
 ): Promise<AttestationVerifyResult> {
-  const decoded = asObject(decodeCbor(decodeFlexibleBase64(options.attestation)));
+  const { decoded, decodedBytes } = decodeCborMap(options.attestation, 'attestationDecodedBytes');
   if (looksLikeAssertionObject(decoded)) {
     throw new AttestVerificationError(ASSERTION_PAYLOAD_ERROR);
   }
@@ -130,7 +180,15 @@ export async function verifyAttestationObject(
     return cert;
   });
   const authData = asBytes(cborField(decoded, 'authData', CTAP_AUTH_DATA), 'authData');
-  const parsed = parseAuthDataOrThrow(authData, true);
+  let parsed: AuthenticatorData;
+  try {
+    parsed = parseAuthenticatorData(authData, true);
+  } catch (error) {
+    const parseMessage = error instanceof Error ? error.message : 'invalid authenticatorData';
+    throw new AttestVerificationError(
+      `${parseMessage}; ${describeAttestationMap(decoded, decodedBytes)}`,
+    );
+  }
   if (!parsed.aaguid || !parsed.credentialId) {
     throw new AttestVerificationError('attestation missing credential data');
   }
@@ -183,7 +241,7 @@ export async function verifyAttestationObject(
 export async function verifyAssertionObject(
   options: VerifyAssertionOptions,
 ): Promise<AssertionVerifyResult> {
-  const decoded = asObject(decodeCbor(decodeFlexibleBase64(options.assertion)));
+  const { decoded } = decodeCborMap(options.assertion, 'assertionDecodedBytes');
   const signature = asBytes(cborField(decoded, 'signature', CTAP_ATT_STMT), 'signature');
   const authenticatorData = asBytes(
     cborField(decoded, 'authenticatorData', CTAP_AUTH_DATA),

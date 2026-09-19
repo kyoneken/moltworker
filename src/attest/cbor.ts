@@ -8,6 +8,14 @@ export type CborValue =
   | CborValue[]
   | { [key: string]: CborValue };
 
+function requireBytes(data: Uint8Array, offset: number, count: number): void {
+  if (offset < 0 || offset + count > data.length) {
+    throw new Error(
+      `truncated CBOR (needed ${count} bytes at offset ${offset}, length=${data.length})`,
+    );
+  }
+}
+
 function readLength(
   data: Uint8Array,
   offset: number,
@@ -17,16 +25,37 @@ function readLength(
     return { length: additional, next: offset };
   }
   if (additional === 24) {
+    requireBytes(data, offset, 1);
     return { length: data[offset], next: offset + 1 };
   }
   if (additional === 25) {
+    requireBytes(data, offset, 2);
     return { length: (data[offset] << 8) | data[offset + 1], next: offset + 2 };
   }
   if (additional === 26) {
+    requireBytes(data, offset, 4);
     const view = new DataView(data.buffer, data.byteOffset + offset, 4);
     return { length: view.getUint32(0, false), next: offset + 4 };
   }
   throw new Error('unsupported CBOR length');
+}
+
+function decodeByteOrTextString(
+  data: Uint8Array,
+  offset: number,
+  additional: number,
+  kind: 'byte' | 'text',
+): { bytes: Uint8Array; next: number } {
+  const length = readLength(data, offset, additional);
+  const start = length.next;
+  const end = start + length.length;
+  if (end > data.length) {
+    const available = Math.max(0, data.length - start);
+    throw new Error(
+      `truncated CBOR ${kind} string (expected ${length.length} bytes at offset ${start}, available ${available})`,
+    );
+  }
+  return { bytes: data.slice(start, end), next: end };
 }
 
 function decodeAt(data: Uint8Array, offset: number): { value: CborValue; next: number } {
@@ -47,14 +76,12 @@ function decodeAt(data: Uint8Array, offset: number): { value: CborValue; next: n
     return { value: -1 - length.length, next: length.next };
   }
   if (major === 2) {
-    const length = readLength(data, next, additional);
-    const end = length.next + length.length;
-    return { value: data.slice(length.next, end), next: end };
+    const decoded = decodeByteOrTextString(data, next, additional, 'byte');
+    return { value: decoded.bytes, next: decoded.next };
   }
   if (major === 3) {
-    const length = readLength(data, next, additional);
-    const end = length.next + length.length;
-    return { value: new TextDecoder().decode(data.slice(length.next, end)), next: end };
+    const decoded = decodeByteOrTextString(data, next, additional, 'text');
+    return { value: new TextDecoder().decode(decoded.bytes), next: decoded.next };
   }
   if (major === 4) {
     const length = readLength(data, next, additional);
@@ -98,6 +125,9 @@ function decodeAt(data: Uint8Array, offset: number): { value: CborValue; next: n
 
 export function decodeCbor(data: Uint8Array): CborValue {
   const decoded = decodeAt(data, 0);
+  if (decoded.next !== data.length) {
+    throw new Error(`trailing CBOR bytes (next=${decoded.next}, length=${data.length})`);
+  }
   return decoded.value;
 }
 
