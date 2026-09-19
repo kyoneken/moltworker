@@ -3,6 +3,9 @@
  *
  * Source: https://www.apple.com/certificateauthority/Apple_App_Attestation_Root_CA.pem
  * PKI index: https://www.apple.com/certificateauthority/
+ *
+ * This root is ECDSA P-384 (secp384r1) with ecdsa-with-SHA384. App Attest
+ * intermediates and device credential keys remain P-256 / SHA-256.
  */
 export const APPLE_APP_ATTEST_ROOT_CA_PEM = `-----BEGIN CERTIFICATE-----
 MIICITCCAaegAwIBAgIQC/O+DvHN0uD7jG5yH2IXmDAKBggqhkjOPQQDAzBSMSYw

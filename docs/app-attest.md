@@ -78,7 +78,10 @@ Verification includes:
 
 - `fmt` is `apple-appattest`
 - x5c chain to the pinned Apple App Attest Root CA (or
-  `ATTEST_TRUST_ANCHOR_PEM` in tests)
+  `ATTEST_TRUST_ANCHOR_PEM` in tests). The root is ECDSA **P-384 / SHA-384**;
+  intermediates and the device credential key stay **P-256 / SHA-256**. Chain
+  verification reads each SPKI namedCurve and signatureAlgorithm instead of
+  hardcoding P-256.
 - nonce extension OID `1.2.840.113635.100.8.2` equals
   `SHA256(authData || SHA256(challenge))`
 - `authData` rpIdHash equals `SHA256(APP_ATTEST_APP_ID)`

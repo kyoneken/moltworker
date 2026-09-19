@@ -19,15 +19,24 @@ import { asBufferSource, bytesEqual } from './encoding';
 import { APPLE_NONCE_OID } from './config';
 
 const ECDSA_WITH_SHA256_OID = '1.2.840.10045.4.3.2';
+const ECDSA_WITH_SHA384_OID = '1.2.840.10045.4.3.3';
 const EC_PUBLIC_KEY_OID = '1.2.840.10045.2.1';
+const P256_OID = '1.2.840.10045.3.1.7';
+const P384_OID = '1.3.132.0.34';
 const COMMON_NAME_OID = '2.5.4.3';
 const EXTENSIONS_OID_CONTAINER = 3;
+
+export type EcNamedCurve = 'P-256' | 'P-384';
+export type EcdsaHash = 'SHA-256' | 'SHA-384';
 
 export interface ParsedCertificate {
   der: Uint8Array;
   tbs: Uint8Array;
   spki: Uint8Array;
   signature: Uint8Array;
+  signatureAlgorithm: Uint8Array;
+  namedCurve: EcNamedCurve;
+  signatureHash: EcdsaHash;
   notBefore: Date;
   notAfter: Date;
   extensions: Map<string, Uint8Array>;
@@ -38,9 +47,9 @@ export function parseCertificate(der: Uint8Array): ParsedCertificate {
   if (cert.tag !== 0x30) {
     throw new Error('certificate is not a SEQUENCE');
   }
-  const [tbsNode, , signatureNode] = derChildren(cert);
-  if (!tbsNode || !signatureNode) {
-    throw new Error('certificate missing TBS or signature');
+  const [tbsNode, algNode, signatureNode] = derChildren(cert);
+  if (!tbsNode || !algNode || !signatureNode) {
+    throw new Error('certificate missing TBS, algorithm, or signature');
   }
   const tbsChildren = derChildren(tbsNode);
   const spki = findSpki(tbsChildren);
@@ -52,10 +61,59 @@ export function parseCertificate(der: Uint8Array): ParsedCertificate {
     tbs: tbsNode.bytes,
     spki,
     signature,
+    signatureAlgorithm: algNode.bytes,
+    namedCurve: namedCurveFromSpki(spki),
+    signatureHash: hashFromSignatureAlgorithm(algNode.bytes),
     notBefore: validity.notBefore,
     notAfter: validity.notAfter,
     extensions,
   };
+}
+
+export function namedCurveFromSpki(spki: Uint8Array): EcNamedCurve {
+  const { node } = readDer(spki, 0);
+  if (node.tag !== 0x30) {
+    throw new Error('SPKI is not a SEQUENCE');
+  }
+  const [algorithm] = derChildren(node);
+  if (!algorithm || algorithm.tag !== 0x30) {
+    throw new Error('SPKI missing algorithm identifier');
+  }
+  const algChildren = derChildren(algorithm);
+  const curveNode = algChildren.find(
+    (child) => child.tag === 0x06 && decodeOid(child.value) !== EC_PUBLIC_KEY_OID,
+  );
+  if (!curveNode) {
+    throw new Error('SPKI missing EC namedCurve');
+  }
+  const oid = decodeOid(curveNode.value);
+  if (oid === P256_OID) {
+    return 'P-256';
+  }
+  if (oid === P384_OID) {
+    return 'P-384';
+  }
+  throw new Error(`unsupported EC namedCurve OID ${oid}`);
+}
+
+export function hashFromSignatureAlgorithm(algorithmDer: Uint8Array): EcdsaHash {
+  const { node } = readDer(algorithmDer, 0);
+  const oidNode = node.tag === 0x06 ? node : derChildren(node).find((child) => child.tag === 0x06);
+  if (!oidNode) {
+    throw new Error('signature algorithm missing OID');
+  }
+  const oid = decodeOid(oidNode.value);
+  if (oid === ECDSA_WITH_SHA256_OID) {
+    return 'SHA-256';
+  }
+  if (oid === ECDSA_WITH_SHA384_OID) {
+    return 'SHA-384';
+  }
+  throw new Error(`unsupported signature algorithm OID ${oid}`);
+}
+
+export function ecdsaComponentSize(curve: EcNamedCurve): number {
+  return curve === 'P-384' ? 48 : 32;
 }
 
 function findSpki(tbsChildren: ReturnType<typeof derChildren>): Uint8Array {
@@ -137,14 +195,23 @@ function decodeBitString(value: Uint8Array): Uint8Array {
   return value.slice(1);
 }
 
-export async function importP256VerifyKey(spki: Uint8Array): Promise<CryptoKey> {
+export async function importEcVerifyKey(spki: Uint8Array): Promise<CryptoKey> {
+  const namedCurve = namedCurveFromSpki(spki);
   return crypto.subtle.importKey(
     'spki',
     asBufferSource(spki),
-    { name: 'ECDSA', namedCurve: 'P-256' },
+    { name: 'ECDSA', namedCurve },
     true,
     ['verify'],
   );
+}
+
+export async function importP256VerifyKey(spki: Uint8Array): Promise<CryptoKey> {
+  const namedCurve = namedCurveFromSpki(spki);
+  if (namedCurve !== 'P-256') {
+    throw new Error(`expected P-256 credential key, got ${namedCurve}`);
+  }
+  return importEcVerifyKey(spki);
 }
 
 export async function rawEcPointFromSpki(spki: Uint8Array): Promise<Uint8Array> {
@@ -152,17 +219,27 @@ export async function rawEcPointFromSpki(spki: Uint8Array): Promise<Uint8Array> 
   return new Uint8Array(await crypto.subtle.exportKey('raw', key));
 }
 
+export async function verifyEcdsa(
+  publicKey: CryptoKey,
+  signature: Uint8Array,
+  data: Uint8Array,
+  hash: EcdsaHash,
+  componentSize?: number,
+): Promise<boolean> {
+  return crypto.subtle.verify(
+    { name: 'ECDSA', hash: { name: hash } },
+    publicKey,
+    asBufferSource(toRawEcdsaSignature(signature, componentSize)),
+    asBufferSource(data),
+  );
+}
+
 export async function verifyEcdsaSha256(
   publicKey: CryptoKey,
   signature: Uint8Array,
   data: Uint8Array,
 ): Promise<boolean> {
-  return crypto.subtle.verify(
-    { name: 'ECDSA', hash: { name: 'SHA-256' } },
-    publicKey,
-    asBufferSource(toRawEcdsaSignature(signature)),
-    asBufferSource(data),
-  );
+  return verifyEcdsa(publicKey, signature, data, 'SHA-256', 32);
 }
 
 export async function verifyCertificateChain(
@@ -191,8 +268,14 @@ export async function verifyCertificateChain(
     const issuer = certs[i + 1];
     /* Sequential: each cert must be verified by the next issuer before continuing. */
     /* eslint-disable no-await-in-loop */
-    const issuerKey = await importP256VerifyKey(issuer.spki);
-    const valid = await verifyEcdsaSha256(issuerKey, subject.signature, subject.tbs);
+    const issuerKey = await importEcVerifyKey(issuer.spki);
+    const valid = await verifyEcdsa(
+      issuerKey,
+      subject.signature,
+      subject.tbs,
+      subject.signatureHash,
+      ecdsaComponentSize(issuer.namedCurve),
+    );
     /* eslint-enable no-await-in-loop */
     if (!valid) {
       throw new Error(`certificate chain signature failed at index ${i}`);
@@ -226,6 +309,23 @@ export async function buildP256Certificate(options: {
   isCa?: boolean;
   nonce?: Uint8Array;
 }): Promise<Uint8Array> {
+  return buildEcCertificate({ ...options, issuerCurve: 'P-256' });
+}
+
+export async function buildEcCertificate(options: {
+  subjectKey: CryptoKey;
+  issuerKey: CryptoKey;
+  issuerCurve: EcNamedCurve;
+  subjectCn: string;
+  issuerCn: string;
+  serial: number;
+  notBefore: Date;
+  notAfter: Date;
+  isCa?: boolean;
+  nonce?: Uint8Array;
+}): Promise<Uint8Array> {
+  const hash: EcdsaHash = options.issuerCurve === 'P-384' ? 'SHA-384' : 'SHA-256';
+  const algOid = hash === 'SHA-384' ? ECDSA_WITH_SHA384_OID : ECDSA_WITH_SHA256_OID;
   const subjectSpki = new Uint8Array(await crypto.subtle.exportKey('spki', options.subjectKey));
   const validity = encodeSequence(
     encodeUtcTime(options.notBefore),
@@ -250,7 +350,7 @@ export async function buildP256Certificate(options: {
   const tbsParts = [
     encodeTlv(contextTag(0, true), encodeIntegerNumber(2)),
     encodeIntegerNumber(options.serial),
-    encodeSequence(encodeOid(ECDSA_WITH_SHA256_OID)),
+    encodeSequence(encodeOid(algOid)),
     encodeName(options.issuerCn),
     validity,
     encodeName(options.subjectCn),
@@ -262,17 +362,13 @@ export async function buildP256Certificate(options: {
   const tbs = encodeSequence(...tbsParts);
   const signatureRaw = new Uint8Array(
     await crypto.subtle.sign(
-      { name: 'ECDSA', hash: { name: 'SHA-256' } },
+      { name: 'ECDSA', hash: { name: hash } },
       options.issuerKey,
       asBufferSource(tbs),
     ),
   );
-  const signatureDer = rawEcdsaToDer(signatureRaw);
-  return encodeSequence(
-    tbs,
-    encodeSequence(encodeOid(ECDSA_WITH_SHA256_OID)),
-    encodeBitString(signatureDer),
-  );
+  const signatureDer = rawEcdsaToDer(signatureRaw, ecdsaComponentSize(options.issuerCurve));
+  return encodeSequence(tbs, encodeSequence(encodeOid(algOid)), encodeBitString(signatureDer));
 }
 
 function encodeName(commonName: string): Uint8Array {

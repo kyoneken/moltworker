@@ -216,12 +216,43 @@ function normalizeComponent(bytes: Uint8Array, componentSize: number): Uint8Arra
   return out;
 }
 
-export function toRawEcdsaSignature(signature: Uint8Array): Uint8Array {
-  if (signature.length === 64) {
+export function inferEcdsaComponentSize(signature: Uint8Array): number {
+  if (signature.length === 64 || signature.length === 96 || signature.length === 132) {
+    return signature.length / 2;
+  }
+  if (signature[0] !== 0x30) {
+    return 32;
+  }
+  const { node } = readDer(signature, 0);
+  const [rNode, sNode] = derChildren(node);
+  const maxLen = Math.max(unsignedIntegerLength(rNode.value), unsignedIntegerLength(sNode.value));
+  if (maxLen <= 32) {
+    return 32;
+  }
+  if (maxLen <= 48) {
+    return 48;
+  }
+  if (maxLen <= 66) {
+    return 66;
+  }
+  throw new Error(`ECDSA component too large: ${maxLen}`);
+}
+
+function unsignedIntegerLength(bytes: Uint8Array): number {
+  let value = bytes;
+  while (value.length > 1 && value[0] === 0x00) {
+    value = value.slice(1);
+  }
+  return value.length;
+}
+
+export function toRawEcdsaSignature(signature: Uint8Array, componentSize?: number): Uint8Array {
+  const size = componentSize ?? inferEcdsaComponentSize(signature);
+  if (signature.length === size * 2) {
     return signature;
   }
   if (signature[0] === 0x30) {
-    return derEcdsaToRaw(signature);
+    return derEcdsaToRaw(signature, size);
   }
   throw new Error('unsupported ECDSA signature encoding');
 }
