@@ -7,8 +7,10 @@
   "scripts": {
     "build": "vite build",
     "deploy": "npm run build && wrangler deploy",
+    "deploy:attest": "wrangler deploy -c wrangler.attest.jsonc",
     "dev": "vite dev",
     "start": "wrangler dev",
+    "start:attest": "wrangler dev -c wrangler.attest.jsonc",
     "types": "wrangler types",
     "typecheck": "tsc --noEmit",
     "lint": "oxlint src/",

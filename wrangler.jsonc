@@ -1,6 +1,7 @@
 {
   "$schema": "node_modules/wrangler/config-schema.json",
   "name": "moltbot-sandbox",
+  // App Attest (attest.kentymyty.com) is a separate worker: wrangler.attest.jsonc
   "main": "src/index.ts",
   "compatibility_date": "2025-05-06",
   "compatibility_flags": ["nodejs_compat"],

@@ -5,9 +5,15 @@ import { api } from './api';
 
 describe('admin model APIs', () => {
   it('lists allowlisted models with primary and manual-only flags', async () => {
-    const response = await api.request('/admin/models', { method: 'GET' }, createMockEnv({ DEV_MODE: 'true' }));
+    const response = await api.request(
+      '/admin/models',
+      { method: 'GET' },
+      createMockEnv({ DEV_MODE: 'true' }),
+    );
     expect(response.status).toBe(200);
-    const body = await response.json();
+    const body = (await response.json()) as {
+      data: Array<{ id: string; primary: boolean; manual_only: boolean }>;
+    };
     expect(body.data[0]).toMatchObject({
       id: DEFAULT_MODEL,
       primary: true,
@@ -68,7 +74,11 @@ describe('admin model APIs', () => {
   });
 
   it('returns usage windows without gateway credentials', async () => {
-    const response = await api.request('/admin/usage', { method: 'GET' }, createMockEnv({ DEV_MODE: 'true' }));
+    const response = await api.request(
+      '/admin/usage',
+      { method: 'GET' },
+      createMockEnv({ DEV_MODE: 'true' }),
+    );
     expect(response.status).toBe(200);
     await expect(response.json()).resolves.toMatchObject({
       configured: false,
