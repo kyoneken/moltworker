@@ -94,6 +94,7 @@ src/
 ├── index.ts          # Main Hono app, route mounting
 ├── types.ts          # TypeScript type definitions
 ├── config.ts         # Constants (ports, timeouts, paths)
+├── attest/           # Separate App Attest worker (wrangler.attest.jsonc)
 ├── auth/             # Cloudflare Access authentication
 │   ├── jwt.ts        # JWT verification
 │   ├── jwks.ts       # JWKS fetching and caching
@@ -146,8 +147,10 @@ npm run test:harness   # Test the multi-agent harness with synthetic fixtures
 npm run test:watch    # Run tests in watch mode
 npm run build         # Build worker + client
 npm run deploy        # Build and deploy to Cloudflare
+npm run deploy:attest # Deploy the App Attest worker (wrangler.attest.jsonc)
 npm run dev           # Vite dev server
 npm run start         # wrangler dev (local worker)
+npm run start:attest  # wrangler dev for the App Attest worker
 npm run typecheck     # TypeScript check
 ```
 

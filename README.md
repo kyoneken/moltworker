@@ -236,6 +236,25 @@ DEV_MODE=true               # Skip Cloudflare Access auth + bypass device pairin
 DEBUG_ROUTES=true           # Enable /debug/* routes (optional)
 ```
 
+## iOS App Attest (Phase B server)
+
+The OpenClaw gateway stays on `moltbot.kentymyty.com`. Apple App Attest
+verification runs as a **separate Worker** (`moltworker-attest`) at
+`https://attest.kentymyty.com` so it does not share the sandbox container,
+Access middleware, or catch-all gateway proxy. See
+[docs/app-attest.md](./docs/app-attest.md) for the API, cookie/WKWebView notes,
+KV + DNS setup, and the Cloudflare Access External Evaluation require rule.
+
+```bash
+npx wrangler kv namespace create ATTEST_KV -c wrangler.attest.jsonc
+npx wrangler secret put ATTEST_SESSION_SECRET -c wrangler.attest.jsonc
+npx wrangler secret put CF_ACCESS_TEAM_DOMAIN -c wrangler.attest.jsonc
+npm run deploy:attest
+```
+
+mTLS is not used. Access still authenticates the Auth0 email; External
+Evaluation only checks that a recent genuine App Attest session exists.
+
 ## Authentication
 
 By default, moltbot uses **device pairing** for authentication. When a new device (browser, CLI, etc.) connects, it must be approved via the admin UI at `/_admin/`.

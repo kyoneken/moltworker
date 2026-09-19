@@ -58,3 +58,15 @@ MOLTBOT_GATEWAY_TOKEN=replace-with-a-different-random-64-hex
 
 # R2 persistence uses the BACKUP_BUCKET binding in wrangler.jsonc.
 # Do not add R2 access keys to the container environment.
+
+# --- App Attest worker (`wrangler.attest.jsonc`, https://attest.kentymyty.com) ---
+# Copy these into the attest worker's .dev.vars (or set secrets on that worker).
+# APP_ATTEST_APP_ID=CYGQ9U7DD2.com.kentymyty.moltworker.mobile.pilot
+# ATTEST_SESSION_SECRET=replace-with-random-64-hex
+# ATTEST_COOKIE_DOMAIN=.kentymyty.com
+# For local wrangler dev over HTTP, leave ATTEST_COOKIE_DOMAIN empty and set:
+# ATTEST_COOKIE_SECURE=false
+# CF_ACCESS_TEAM_DOMAIN=yourteam.cloudflareaccess.com
+# Optional: ATTEST_ACCESS_AUD=your-access-application-audience
+# Optional: APP_ATTEST_ALLOWED_ENVIRONMENTS=sandbox,production
+

@@ -1,0 +1,37 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "moltworker-attest",
+  "main": "src/attest/index.ts",
+  "compatibility_date": "2025-05-06",
+  "workers_dev": true,
+  "preview_urls": false,
+  "routes": [
+    {
+      "pattern": "attest.kentymyty.com",
+      "custom_domain": true
+    }
+  ],
+  "observability": {
+    "enabled": true
+  },
+  // Create the namespace, then replace this placeholder:
+  //   npx wrangler kv namespace create ATTEST_KV -c wrangler.attest.jsonc
+  "kv_namespaces": [
+    {
+      "binding": "ATTEST_KV",
+      "id": "7c87262b57a74ac0b0362fbf174548cc"
+    }
+  ],
+  "vars": {
+    "APP_ATTEST_APP_ID": "CYGQ9U7DD2.com.kentymyty.moltworker.mobile.pilot",
+    "ATTEST_COOKIE_DOMAIN": ".kentymyty.com",
+    "APP_ATTEST_ALLOWED_ENVIRONMENTS": "sandbox,production"
+  }
+  // Secrets (`npx wrangler secret put NAME -c wrangler.attest.jsonc`):
+  // - ATTEST_SESSION_SECRET: HS256 secret for mw_attest_session (openssl rand -hex 32)
+  // - CF_ACCESS_TEAM_DOMAIN: Access team domain used to verify External Evaluation JWTs
+  // Optional:
+  // - ATTEST_ACCESS_AUD: audience check for incoming evaluation JWTs
+  // - ATTEST_COOKIE_SECURE: "true" | "false" (defaults to Secure except DEV_MODE=true)
+  // - ATTEST_CHALLENGE_TTL_SECONDS, ATTEST_SESSION_TTL_SECONDS
+}
