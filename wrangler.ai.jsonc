@@ -1,0 +1,24 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "moltworker-ai",
+  "main": "src/ai-worker/index.ts",
+  "compatibility_date": "2025-05-06",
+  "workers_dev": true,
+  "preview_urls": false,
+  "observability": {
+    "enabled": true
+  },
+  // Workers AI binding — Free-plan compatible (usage limits apply).
+  "ai": {
+    "binding": "AI"
+  }
+  // Free keepers only: no Sandbox class, Durable Objects, Browser Rendering, or R2.
+  //
+  // Required secrets / vars (`npx wrangler secret put NAME -c wrangler.ai.jsonc`):
+  // - AI_PROXY_TOKEN: Bearer secret for Authorization (openssl rand -hex 32)
+  // - AI_GATEWAY_ID: AI Gateway id used by env.AI.run({ gateway: { id } })
+  //   (can also be set as a plain var in the dashboard / wrangler vars)
+  //
+  // Local: copy the AI_* lines from .dev.vars.example into .dev.vars, then:
+  //   npm run dev:ai
+}
