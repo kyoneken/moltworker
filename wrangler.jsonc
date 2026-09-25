@@ -1,7 +1,9 @@
 {
   "$schema": "node_modules/wrangler/config-schema.json",
   "name": "moltbot-sandbox",
-  // App Attest (attest.kentymyty.com) is a separate worker: wrangler.attest.jsonc
+  // App Attest (attest.kentymyty.com) is a separate Free worker: wrangler.attest.jsonc
+  // Workers AI standalone Free worker: wrangler.ai.jsonc (npm run deploy:ai)
+  // This file is the DEPRECATED Paid Sandbox / OpenClaw path (npm run deploy:sandbox).
   "main": "src/index.ts",
   "compatibility_date": "2025-05-06",
   "compatibility_flags": ["nodejs_compat"],

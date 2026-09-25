@@ -95,6 +95,8 @@ src/
 ├── types.ts          # TypeScript type definitions
 ├── config.ts         # Constants (ports, timeouts, paths)
 ├── attest/           # Separate App Attest worker (wrangler.attest.jsonc)
+├── ai-proxy/         # Shared OpenAI-compatible Workers AI proxy modules
+├── ai-worker/        # Standalone Free AI Worker entry (wrangler.ai.jsonc)
 ├── auth/             # Cloudflare Access authentication
 │   ├── jwt.ts        # JWT verification
 │   ├── jwks.ts       # JWKS fetching and caching
@@ -146,10 +148,13 @@ npm test              # Run tests (vitest)
 npm run test:harness   # Test the multi-agent harness with synthetic fixtures
 npm run test:watch    # Run tests in watch mode
 npm run build         # Build worker + client
-npm run deploy        # Build and deploy to Cloudflare
+npm run deploy        # Fails: deprecated — use deploy:attest / deploy:ai
 npm run deploy:attest # Deploy the App Attest worker (wrangler.attest.jsonc)
+npm run deploy:ai     # Deploy the Free Workers AI proxy (wrangler.ai.jsonc)
+npm run deploy:sandbox # DEPRECATED Paid Sandbox / OpenClaw (unsupported)
 npm run dev           # Vite dev server
-npm run start         # wrangler dev (local worker)
+npm run dev:ai        # wrangler dev for the AI proxy worker
+npm run start         # wrangler dev (local deprecated sandbox worker)
 npm run start:attest  # wrangler dev for the App Attest worker
 npm run typecheck     # TypeScript check
 ```

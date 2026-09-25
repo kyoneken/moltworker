@@ -1,12 +1,13 @@
 # App Attest Worker
 
-Phase B server for the solo-user iOS pilot. This repository now contains **two
-Workers**:
+Phase B server for the solo-user iOS pilot. This repository keeps **Free-plan
+Workers** as the supported surface:
 
 | Worker | Config | Hostname | Role |
 |--------|--------|----------|------|
-| `moltbot-sandbox` | `wrangler.jsonc` | `moltbot.kentymyty.com` | OpenClaw gateway + admin UI |
 | `moltworker-attest` | `wrangler.attest.jsonc` | `attest.kentymyty.com` | Apple App Attest + Access External Evaluation |
+| `moltworker-ai` | `wrangler.ai.jsonc` | workers.dev (or your domain) | OpenAI-compatible Workers AI proxy |
+| `moltbot-sandbox` *(deprecated)* | `wrangler.jsonc` | `moltbot.kentymyty.com` | OpenClaw gateway + admin UI (Paid) |
 
 The attest service is a **separate Worker** so `/v1/*` never starts a sandbox
 container, never runs Cloudflare Access middleware, and never falls through to

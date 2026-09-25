@@ -1,10 +1,10 @@
 import { Hono, type Context } from 'hono';
 import { hasValidProxyAuthorization } from '../ai-proxy/auth';
+import type { AiProxyAppEnv } from '../ai-proxy/env';
 import { runWorkersAi } from '../ai-proxy/inference';
 import { createOpenAIModelList } from '../ai-proxy/models';
 import { parseChatCompletionRequest } from '../ai-proxy/request';
 import { ProxyRequestError, type AllowedModel } from '../ai-proxy/types';
-import type { AppEnv } from '../types';
 
 type ProxyErrorStatus = 400 | 401 | 405 | 413 | 500;
 type ProxyStage = 'authentication' | 'method' | 'validation' | 'inference';
@@ -36,7 +36,7 @@ function logProxyError(details: ProxyErrorLog): void {
 }
 
 export function openAIError(
-  c: Context<AppEnv>,
+  c: Context<AiProxyAppEnv>,
   status: ProxyErrorStatus,
   code: string,
   message: string,
@@ -56,102 +56,118 @@ export function openAIError(
   );
 }
 
-export const aiProxy = new Hono<AppEnv>();
+/**
+ * Relative OpenAI-compatible routes (`/models`, `/chat/completions`).
+ * Mount under `/internal/ai/v1` (sandbox) and/or `/v1` (standalone Free worker).
+ */
+export function createAiProxyRoutes(): Hono<AiProxyAppEnv> {
+  const routes = new Hono<AiProxyAppEnv>();
 
-const chatCompletionsPath = '/internal/ai/v1/chat/completions';
-const modelsPath = '/internal/ai/v1/models';
+  const chatCompletionsPath = '/chat/completions';
+  const modelsPath = '/models';
 
-function modelListMethodNotAllowed(c: Context<AppEnv>): Response {
-  const requestId = crypto.randomUUID();
-  logProxyError({ requestId, stage: 'method', status: 405 });
-  c.header('allow', 'GET');
-  return openAIError(c, 405, 'method_not_allowed', 'Method not allowed', requestId);
-}
-
-aiProxy.use(modelsPath, async (c, next) => {
-  if (c.req.raw.method === 'HEAD') {
-    return modelListMethodNotAllowed(c);
-  }
-  await next();
-});
-
-aiProxy.get(modelsPath, async (c) => {
-  const requestId = crypto.randomUUID();
-  const authorized = await hasValidProxyAuthorization(
-    c.req.header('Authorization'),
-    c.env.AI_PROXY_TOKEN,
-  );
-  if (!authorized) {
-    logProxyError({ requestId, stage: 'authentication', status: 401 });
-    return openAIError(c, 401, 'invalid_api_key', 'Unauthorized', requestId);
+  function modelListMethodNotAllowed(c: Context<AiProxyAppEnv>): Response {
+    const requestId = crypto.randomUUID();
+    logProxyError({ requestId, stage: 'method', status: 405 });
+    c.header('allow', 'GET');
+    return openAIError(c, 405, 'method_not_allowed', 'Method not allowed', requestId);
   }
 
-  return c.json(createOpenAIModelList());
-});
+  routes.use(modelsPath, async (c, next) => {
+    if (c.req.raw.method === 'HEAD') {
+      return modelListMethodNotAllowed(c);
+    }
+    await next();
+  });
 
-aiProxy.all(modelsPath, (c) => {
-  return modelListMethodNotAllowed(c);
-});
-
-aiProxy.post(chatCompletionsPath, async (c) => {
-  const requestId = crypto.randomUUID();
-  let stage: ProxyStage = 'authentication';
-  let model: AllowedModel | undefined;
-
-  try {
+  routes.get(modelsPath, async (c) => {
+    const requestId = crypto.randomUUID();
     const authorized = await hasValidProxyAuthorization(
       c.req.header('Authorization'),
       c.env.AI_PROXY_TOKEN,
     );
     if (!authorized) {
-      logProxyError({ requestId, stage, status: 401 });
+      logProxyError({ requestId, stage: 'authentication', status: 401 });
       return openAIError(c, 401, 'invalid_api_key', 'Unauthorized', requestId);
     }
 
-    stage = 'validation';
-    const input = await parseChatCompletionRequest(c.req.raw, { bucket: c.env.BACKUP_BUCKET });
-    model = input.model;
+    return c.json(createOpenAIModelList());
+  });
 
-    stage = 'inference';
-    const response = await runWorkersAi(
-      c.env.AI,
-      c.env.AI_GATEWAY_ID ?? '',
-      input,
-      c.req.raw.signal,
-    );
-    response.headers.set('x-request-id', requestId);
+  routes.all(modelsPath, (c) => {
+    return modelListMethodNotAllowed(c);
+  });
 
-    if (!response.ok) {
+  routes.post(chatCompletionsPath, async (c) => {
+    const requestId = crypto.randomUUID();
+    let stage: ProxyStage = 'authentication';
+    let model: AllowedModel | undefined;
+
+    try {
+      const authorized = await hasValidProxyAuthorization(
+        c.req.header('Authorization'),
+        c.env.AI_PROXY_TOKEN,
+      );
+      if (!authorized) {
+        logProxyError({ requestId, stage, status: 401 });
+        return openAIError(c, 401, 'invalid_api_key', 'Unauthorized', requestId);
+      }
+
+      stage = 'validation';
+      const input = await parseChatCompletionRequest(c.req.raw, {
+        // Optional: sandbox Worker may supply R2 for Admin session-model fallback.
+        // Standalone Free AI Worker omits BACKUP_BUCKET — clients must send `model`.
+        bucket: c.env.BACKUP_BUCKET,
+      });
+      model = input.model;
+
+      stage = 'inference';
+      const response = await runWorkersAi(
+        c.env.AI,
+        c.env.AI_GATEWAY_ID ?? '',
+        input,
+        c.req.raw.signal,
+      );
+      response.headers.set('x-request-id', requestId);
+
+      if (!response.ok) {
+        logProxyError({
+          requestId,
+          stage,
+          status: response.status,
+          model,
+          gatewayLogId: gatewayLogId(c.env.AI),
+        });
+      }
+
+      return response;
+    } catch (error) {
+      if (error instanceof ProxyRequestError) {
+        logProxyError({ requestId, stage, status: error.status });
+        return openAIError(c, error.status, error.code, error.message, requestId);
+      }
+
       logProxyError({
         requestId,
         stage,
-        status: response.status,
+        status: 500,
         model,
         gatewayLogId: gatewayLogId(c.env.AI),
       });
+      return openAIError(c, 500, 'internal_error', 'Internal server error', requestId);
     }
+  });
 
-    return response;
-  } catch (error) {
-    if (error instanceof ProxyRequestError) {
-      logProxyError({ requestId, stage, status: error.status });
-      return openAIError(c, error.status, error.code, error.message, requestId);
-    }
+  routes.all(chatCompletionsPath, (c) => {
+    const requestId = crypto.randomUUID();
+    logProxyError({ requestId, stage: 'method', status: 405 });
+    c.header('allow', 'POST');
+    return openAIError(c, 405, 'method_not_allowed', 'Method not allowed', requestId);
+  });
 
-    logProxyError({
-      requestId,
-      stage,
-      status: 500,
-      model,
-      gatewayLogId: gatewayLogId(c.env.AI),
-    });
-    return openAIError(c, 500, 'internal_error', 'Internal server error', requestId);
-  }
-});
+  return routes;
+}
 
-aiProxy.all(chatCompletionsPath, (c) => {
-  const requestId = crypto.randomUUID();
-  logProxyError({ requestId, stage: 'method', status: 405 });
-  c.header('allow', 'POST');
-  return openAIError(c, 405, 'method_not_allowed', 'Method not allowed', requestId);
-});
+/** Sandbox / colocated mount: `/internal/ai/v1/*`. */
+export const aiProxy = new Hono<AiProxyAppEnv>();
+aiProxy.route('/internal/ai/v1', createAiProxyRoutes());

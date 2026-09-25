@@ -59,6 +59,13 @@ MOLTBOT_GATEWAY_TOKEN=replace-with-a-different-random-64-hex
 # R2 persistence uses the BACKUP_BUCKET binding in wrangler.jsonc.
 # Do not add R2 access keys to the container environment.
 
+# --- Standalone Workers AI proxy (`wrangler.ai.jsonc`) ---
+# Free-plan Worker: AI binding only (no containers / DO / R2 / browser).
+# AI_PROXY_TOKEN=replace-with-random-64-hex
+# AI_GATEWAY_ID=your-ai-gateway-id
+# Local: npm run dev:ai
+# Deploy: npm run deploy:ai
+
 # --- App Attest worker (`wrangler.attest.jsonc`, https://attest.kentymyty.com) ---
 # Copy these into the attest worker's .dev.vars (or set secrets on that worker).
 # APP_ATTEST_APP_ID=CYGQ9U7DD2.com.kentymyty.moltworker.mobile.pilot

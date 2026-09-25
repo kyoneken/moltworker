@@ -1,24 +1,56 @@
-# OpenClaw on Cloudflare Workers
+# moltworker (Free-plan Cloudflare Workers)
 
-Run [OpenClaw](https://github.com/openclaw/openclaw) (formerly Moltbot, formerly Clawdbot) personal AI assistant in a [Cloudflare Sandbox](https://developers.cloudflare.com/sandbox/).
+This fork keeps **Cloudflare Free–compatible Workers** as the supported surface.
+OpenClaw was built elsewhere; the Paid Sandbox / OpenClaw hosting path in this
+repo is **deprecated and not maintained**.
 
 ![moltworker architecture](./assets/logo.png)
 
-> **Experimental:** This is a proof of concept demonstrating that OpenClaw can run in Cloudflare Sandbox. It is not officially supported and may break without notice. Use at your own risk.
+## Supported workers (Free plan)
 
-[![Deploy to Cloudflare](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https://github.com/cloudflare/moltworker)
+| Worker | Config | Deploy | Docs |
+|--------|--------|--------|------|
+| **App Attest** | `wrangler.attest.jsonc` | `npm run deploy:attest` | [docs/app-attest.md](./docs/app-attest.md) |
+| **Workers AI proxy** | `wrangler.ai.jsonc` | `npm run deploy:ai` | [docs/workers-ai.md](./docs/workers-ai.md) |
 
-## Requirements
+Both use Workers only (plus KV for Attest, Workers AI + optional AI Gateway for
+the proxy). No Containers, Durable Objects, Browser Rendering, or R2 are
+required for these paths.
 
-- [Workers Paid plan](https://www.cloudflare.com/plans/developer-platform/) ($5 USD/month) — required for Cloudflare Sandbox containers. Running the container incurs additional compute costs; see [Container Cost Estimate](#container-cost-estimate) below for details.
-- A Workers AI-enabled Cloudflare account and a dedicated [AI Gateway](https://developers.cloudflare.com/ai-gateway/) for inference logs and cost controls
+### 1. App Attest Worker
 
-The following Cloudflare features used by this project have free tiers:
-- Cloudflare Access (authentication)
-- Browser Rendering (for browser navigation)
-- Workers AI (default model inference)
-- AI Gateway (inference logging and usage controls)
-- R2 Storage (snapshot persistence)
+Apple App Attest challenge / attest / assert and Cloudflare Access External
+Evaluation. Independently deployable:
+
+```bash
+npx wrangler kv namespace create ATTEST_KV -c wrangler.attest.jsonc
+npx wrangler secret put ATTEST_SESSION_SECRET -c wrangler.attest.jsonc
+npx wrangler secret put CF_ACCESS_TEAM_DOMAIN -c wrangler.attest.jsonc
+npm run deploy:attest
+```
+
+### 2. Workers AI OpenAI-compatible proxy
+
+Authenticated `POST /v1/chat/completions` (and `/v1/models`) via the Workers AI
+binding. Fail-closed Bearer auth (`AI_PROXY_TOKEN`). Requires an AI Gateway id
+(`AI_GATEWAY_ID`):
+
+```bash
+npx wrangler secret put AI_PROXY_TOKEN -c wrangler.ai.jsonc
+npx wrangler secret put AI_GATEWAY_ID -c wrangler.ai.jsonc
+npm run deploy:ai
+```
+
+See [docs/workers-ai.md](./docs/workers-ai.md) for curl examples and Free-plan notes.
+
+### Deploy scripts
+
+| Script | Status |
+|--------|--------|
+| `npm run deploy:attest` | Supported (Free) |
+| `npm run deploy:ai` | Supported (Free) |
+| `npm run deploy` | **Fails** with a deprecation message |
+| `npm run deploy:sandbox` | Paid Sandbox path — **unsupported / deprecated** |
 
 ## Development Agent Harness (Optional)
 
@@ -50,6 +82,16 @@ The 1Password entry invokes only the local `1password-mcp` command. The first
 authorized Environment access may require 1Password Desktop approval. Do not
 add selectors, tokens, or secret values to MCP arguments or tracked files.
 
+---
+
+# Deprecated: OpenClaw Sandbox (Paid Workers)
+
+> **Deprecated / not maintained in this fork.** The sections below document the
+> legacy Cloudflare Sandbox + OpenClaw container Worker (`wrangler.jsonc`). It
+> requires the [Workers Paid plan](https://www.cloudflare.com/plans/developer-platform/)
+> (containers). Prefer **App Attest** and **Workers AI** above. If you still
+> need this path: `npm run deploy:sandbox` (unsupported).
+
 ## Container Cost Estimate
 
 This project uses a `standard-1` Cloudflare Container instance (1/2 vCPU, 4 GiB memory, 8 GB disk). Below are approximate monthly costs assuming the container runs 24/7, based on [Cloudflare Containers pricing](https://developers.cloudflare.com/containers/pricing/):
@@ -79,13 +121,13 @@ Notes:
 - **Persistent conversations** - Chat history and context across sessions
 - **Agent runtime** - Extensible AI capabilities with workspace and skills
 
-This project packages OpenClaw to run in a [Cloudflare Sandbox](https://developers.cloudflare.com/sandbox/) container, providing a fully managed deployment without needing to self-host. The default production architecture uses Workers AI through the authenticated Worker proxy and R2-backed Sandbox snapshots for persistence.
+This packaging ran OpenClaw in a [Cloudflare Sandbox](https://developers.cloudflare.com/sandbox/) container. That path is deprecated here; OpenClaw itself lives upstream.
 
 ## Architecture
 
 ![moltworker architecture](./assets/architecture.png)
 
-## Quick Start
+## Quick Start (deprecated sandbox)
 
 _Cloudflare Sandboxes are available on the [Workers Paid plan](https://dash.cloudflare.com/?to=/:account/workers/plans)._
 
@@ -110,7 +152,7 @@ printf '%s' '10m' | npx wrangler secret put SANDBOX_SLEEP_AFTER
 npx wrangler secret put MOLTBOT_GATEWAY_TOKEN
 
 # Deploy
-npm run deploy
+npm run deploy:sandbox
 ```
 
 After deploying, open the Control UI with your token:
@@ -211,7 +253,7 @@ You can find your team domain in the [Zero Trust Dashboard](https://one.dash.clo
 ### 3. Redeploy
 
 ```bash
-npm run deploy
+npm run deploy:sandbox
 ```
 
 Now visit `/_admin/` and you'll be prompted to authenticate via Cloudflare Access before accessing the admin UI.
@@ -238,12 +280,14 @@ DEBUG_ROUTES=true           # Enable /debug/* routes (optional)
 
 ## iOS App Attest (Phase B server)
 
-The OpenClaw gateway stays on `moltbot.kentymyty.com`. Apple App Attest
-verification runs as a **separate Worker** (`moltworker-attest`) at
-`https://attest.kentymyty.com` so it does not share the sandbox container,
-Access middleware, or catch-all gateway proxy. See
-[docs/app-attest.md](./docs/app-attest.md) for the API, cookie/WKWebView notes,
-KV + DNS setup, and the Cloudflare Access External Evaluation require rule.
+App Attest is a **supported Free-plan Worker** (see the top of this README).
+When pairing with a legacy sandbox host, the OpenClaw gateway stays on
+`moltbot.kentymyty.com` while Apple App Attest verification runs as a
+**separate Worker** (`moltworker-attest`) at `https://attest.kentymyty.com` so
+it does not share the sandbox container, Access middleware, or catch-all
+gateway proxy. See [docs/app-attest.md](./docs/app-attest.md) for the API,
+cookie/WKWebView notes, KV + DNS setup, and the Cloudflare Access External
+Evaluation require rule.
 
 ```bash
 npx wrangler kv namespace create ATTEST_KV -c wrangler.attest.jsonc
@@ -377,14 +421,14 @@ Debug endpoints are available at `/debug/*` when enabled (requires `DEBUG_ROUTES
 
 ```bash
 npx wrangler secret put TELEGRAM_BOT_TOKEN
-npm run deploy
+npm run deploy:sandbox
 ```
 
 ### Discord
 
 ```bash
 npx wrangler secret put DISCORD_BOT_TOKEN
-npm run deploy
+npm run deploy:sandbox
 ```
 
 ### Slack
@@ -423,7 +467,7 @@ npx wrangler secret put SLACK_READY_CHANNEL_ID
 # In Slack, open the channel details and copy the Channel ID from the About tab.
 npx wrangler secret put SLACK_ALLOWED_CHANNELS
 
-npm run deploy
+npm run deploy:sandbox
 ```
 
 Both tokens are required. The deployed container enables Slack in Socket Mode
@@ -531,7 +575,7 @@ npx wrangler secret put WORKER_URL
 3. Redeploy:
 
 ```bash
-npm run deploy
+npm run deploy:sandbox
 ```
 
 ### Endpoints
@@ -620,9 +664,11 @@ and the Browser Run Skill manually from a paired Control UI agent session as
 described in [`test/e2e/README.md`](test/e2e/README.md); there is no supported
 production remote-exec endpoint for arbitrary container commands.
 
-## Workers AI Proxy (Default)
+## Workers AI Proxy (colocated on deprecated sandbox)
 
-The checked-in Wrangler configuration exposes the Cloudflare Workers AI binding as `AI`. OpenClaw does not call that binding directly from the container. Instead, it sends OpenAI-compatible requests to `POST /internal/ai/v1/chat/completions`; the Worker authenticates the request with `AI_PROXY_TOKEN`, allowlists the model, and invokes `env.AI.run()` through the `AI_GATEWAY_ID` gateway.
+On the deprecated sandbox Worker, the Wrangler configuration exposes the Cloudflare Workers AI binding as `AI`. OpenClaw does not call that binding directly from the container. Instead, it sends OpenAI-compatible requests to `POST /internal/ai/v1/chat/completions`; the Worker authenticates the request with `AI_PROXY_TOKEN`, allowlists the model, and invokes `env.AI.run()` through the `AI_GATEWAY_ID` gateway.
+
+For the **supported Free-plan standalone Worker**, see [docs/workers-ai.md](./docs/workers-ai.md) (`npm run deploy:ai`).
 
 The default deployment registers exactly three OpenClaw models. The model policy is fixed:
 
